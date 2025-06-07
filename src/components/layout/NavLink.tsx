@@ -1,3 +1,4 @@
+
 'use client';
 
 import Link from 'next/link';
@@ -18,7 +19,7 @@ export function NavLink({ href, label, icon: Icon, tooltip }: NavLinkProps) {
   const isActive = pathname === href || (href !== '/dashboard' && pathname.startsWith(href));
 
   return (
-    <Link href={href} passHref legacyBehavior>
+    <Link href={href}>
       <SidebarMenuButton
         isActive={isActive}
         tooltip={tooltip || label}

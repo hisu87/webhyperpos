@@ -1,6 +1,7 @@
 
 import { initializeApp, getApps, FirebaseApp } from "firebase/app";
 import { getFirestore, Firestore } from "firebase/firestore";
+import { getAnalytics } from "firebase/analytics";
 
 // Your web app's Firebase configuration
 // For Firebase JS SDK v7.20.0 and later, measurementId is optional
@@ -24,5 +25,4 @@ if (!getApps().length) {
 
 // Initialize Cloud Firestore and get a reference to the service
 const db: Firestore = getFirestore(app);
-
-export {
+const analytics = getAnalytics(app);

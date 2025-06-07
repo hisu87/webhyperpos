@@ -31,6 +31,7 @@ export interface User {
   email?: string; // For Firebase Auth linkage
   displayName?: string;
   photoURL?: string;
+  firebaseUid?: string; // UID from Firebase Authentication (e.g., Google Sign-In)
   createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại)
   updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi)
 }
@@ -97,8 +98,8 @@ export interface Inventory {
   unit?: string; // Denormalized from Ingredient for easier display
   lastStocktakeDate?: Date;
   notes?: string;
-  createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại)
-  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi currentQuantity thay đổi)
+  createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại) - Thường là thời điểm bản ghi inventory được tạo lần đầu cho một cặp branch-ingredient.
+  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi current_quantity thay đổi)
 }
 
 export interface StockMovement {
@@ -112,7 +113,7 @@ export interface StockMovement {
   source?: string; // TEXT (Nguồn gốc: nhà cung cấp, bán hàng...)
   referenceId?: string; // e.g., PurchaseOrder ID, Order ID, Transfer ID
   notes?: string;
-  createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại)
+  createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại) - Đây là thời điểm diễn ra sự kiện nhập/xuất kho.
   updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi)
 }
 
@@ -139,7 +140,7 @@ export interface Order {
   orderNumber?: string; // Human-readable order number
   status: 'pending' | 'open' | 'preparing' | 'ready' | 'served' | 'paid' | 'completed' | 'cancelled' | 'refunded' | string; // TEXT
   type: 'dine-in' | 'takeout' | 'delivery';
-  subtotalAmount: number; // Sum of OrderLineItem totalPrices before discounts/taxes
+  subtotalAmount: number; // Sum of PersistedOrderItem totalPrices before discounts/taxes
   discountAmount?: number; // DECIMAL(10,2)
   taxAmount?: number;
   serviceChargeAmount?: number;
@@ -150,10 +151,10 @@ export interface Order {
   createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại)
   paidAt?: Date; // TIMESTAMP (Optional - Thời điểm thanh toán)
   completedAt?: Date; // When order reached a final state (paid/completed/cancelled)
-  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi)
+  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi, ví dụ khi trạng thái thay đổi hoặc thêm item)
 }
 
-// Renamed from OrderLineItem to match new spec "Order Items" for persisted items
+
 export interface PersistedOrderItem {
   id: string; // UUID (Primary Key)
   orderId: string; // UUID (Foreign Key to Order)
@@ -162,17 +163,9 @@ export interface PersistedOrderItem {
   quantity: number; // INTEGER (Số lượng món)
   unitPrice: number; // DECIMAL(10,2) (Giá của một đơn vị món tại thời điểm đặt hàng)
   itemSubtotal?: number; // quantity * unitPrice (can include option price adjustments in more complex scenarios)
-  notes?: string; // TEXT (Ghi chú cho món: ít đường, không đá..., Optional)
-  // For more complex scenarios with options:
-  // selectedOptions?: Array<{
-  //   optionId: string;
-  //   optionName: string;
-  //   choiceId: string;
-  //   choiceName: string;
-  //   additionalPrice?: number;
-  // }>;
+  note?: string; // TEXT (Ghi chú cho món: ít đường, không đá..., Optional)
   createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại)
-  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi)
+  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi, ví dụ khi note hoặc quantity thay đổi)
 }
 
 // Client-side cart item structure - kept distinct
@@ -184,7 +177,6 @@ export interface OrderItem extends MenuItem {
   calculatedPrice: number; // MenuItem.price + sum of selected options' additionalPrice
 }
 
-// New Entities
 
 export interface Payment {
   id: string; // UUID (Primary Key)
@@ -192,8 +184,8 @@ export interface Payment {
   paymentMethod: string; // TEXT
   amount: number; // DECIMAL(10,2)
   transactionId?: string; // TEXT (Optional)
-  createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại)
-  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi)
+  createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại) - Đây là thời điểm diễn ra giao dịch thanh toán.
+  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi, ví dụ khi có điều chỉnh thanh toán)
 }
 
 export interface DiscountPromotion {
@@ -223,10 +215,10 @@ export interface CustomerLoyalty {
   // address?: string;
   // birthDate?: Date;
   createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại)
-  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi)
+  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi, ví dụ khi điểm tích lũy thay đổi)
 }
 
-// Updated ShiftReport
+
 export interface ShiftReport {
   id: string; // UUID (Primary Key)
   branchId: string; // UUID (Foreign Key to Branch)
@@ -239,11 +231,9 @@ export interface ShiftReport {
   // otherPaymentMethodsTotal?: number; // For payment methods not explicitly listed
   totalRevenue: number; // DECIMAL(10,2)
   totalTransactions: number; // INTEGER
-  // startingCash?: number; // Cash at the beginning of the shift
-  // endingCash?: number; // Cash at the end of the shift (for reconciliation)
   notes?: string; // TEXT (Optional)
-  createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại)
-  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi)
+  createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại) - Thường là thời điểm báo cáo ca được tạo (khi ca kết thúc).
+  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi, ví dụ khi quản lý điều chỉnh báo cáo)
 }
 
 
@@ -257,5 +247,3 @@ export interface PredictedSale {
   date: string; // YYYY-MM-DD
   predictedSales: number;
 }
-
-    

@@ -1,216 +1,253 @@
 
 export type TableStatus = 'available' | 'occupied' | 'reserved' | 'cleaning';
 
-// Core Entities based on new schema
+// Core Entities based on the provided schema
 
 export interface Tenant {
-  id: string; // UUID
-  name: string; // TEXT, required
-  subscriptionPlan?: 'basic' | 'pro' | 'enterprise' | string; // TEXT
-  createdAt: Date; // TIMESTAMP
-  updatedAt: Date; // TIMESTAMP
+  id: string; // UUID (Primary Key)
+  name: string; // TEXT (Tên doanh nghiệp/cửa hàng, bắt buộc nhập)
+  subscriptionPlan?: string; // TEXT (Loại gói dịch vụ sử dụng: basic, pro, enterprise...)
+  createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại)
+  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi)
 }
 
 export interface Branch {
-  id: string; // UUID
-  tenantId: string; // UUID, FK to Tenant
-  name: string; // TEXT, required
-  location?: string; // TEXT
-  createdAt: Date;
-  updatedAt: Date;
+  id: string; // UUID (Primary Key)
+  tenantId: string; // UUID (Foreign Key to Tenant)
+  name: string; // TEXT (Tên chi nhánh, bắt buộc nhập)
+  location?: string; // TEXT (Địa chỉ chi nhánh)
+  createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại)
+  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi)
 }
 
 export interface User {
-  id: string; // UUID
-  tenantId: string; // UUID, FK to Tenant
-  branchId: string; // UUID, FK to Branch
-  username: string; // TEXT, unique in branch
-  role: 'staff' | 'cashier' | 'manager' | 'admin' | string; // TEXT
-  pinCode?: string; // TEXT, secured (hashed)
-  active: boolean; // BOOLEAN, default true
+  id: string; // UUID (Primary Key)
+  tenantId: string; // UUID (Foreign Key to Tenant)
+  branchId: string; // UUID (Foreign Key to Branch)
+  username: string; // TEXT (Tên đăng nhập, duy nhất trong một chi nhánh)
+  role: 'staff' | 'cashier' | 'manager' | 'admin' | string; // TEXT (Vai trò người dùng)
+  hashedPinCode?: string; // TEXT (Mã PIN đăng nhập POS, bảo mật)
+  active: boolean; // BOOLEAN (Trạng thái hoạt động của tài khoản, mặc định: true)
   email?: string; // For Firebase Auth linkage
   displayName?: string;
   photoURL?: string;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface CafeTable {
-  id: string; // UUID
-  branchId: string; // UUID, FK to Branch
-  tableNumber: string; // TEXT, e.g., "B01" (replaces old 'name')
-  zone?: string; // TEXT, e.g., "A", "B", "Outdoor" (replaces old 'area')
-  status: TableStatus; // Kept from original 'Table' type
-  capacity: number; // Kept from original 'Table' type
-  active: boolean; // BOOLEAN, default true
-  currentOrderId?: string; // Optional: to link to an active order
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại)
+  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi)
 }
 
 export interface Menu {
-  id: string; // UUID
-  tenantId: string; // UUID, FK to Tenant
-  name: string; // TEXT, e.g., "Menu Tết"
-  version: number; // INTEGER, default 1
-  active: boolean; // BOOLEAN
+  id: string; // UUID (Primary Key)
+  tenantId: string; // UUID (Foreign Key to Tenant)
+  name: string; // TEXT (Tên menu, ví dụ: "Menu Tết", "Menu Mùa Hè")
+  version: number; // INTEGER (Phiên bản của menu, mặc định là 1)
+  isActive: boolean; // BOOLEAN (Trạng thái menu có đang được sử dụng hay không)
   description?: string;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface MenuOptionChoice {
-  id: string; // e.g. "choice_small", "choice_almond_milk"
-  name: string; // e.g., "Small", "Almond Milk"
-  additionalPrice?: number; // Optional price adjustment for this specific choice
-}
-
-export interface MenuOption {
-  id: string; // e.g. "option_size", "option_milk_type"
-  name: string; // Display name e.g., "Size", "Milk Type"
-  description?: string;
-  choices: MenuOptionChoice[];
-  type: 'single' | 'multiple'; // Whether user can select one or multiple choices
-  required: boolean;
+  createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại)
+  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi)
 }
 
 export interface MenuItem {
-  id: string; // UUID
-  menuId: string; // UUID, FK to Menu
-  name: string; // TEXT
+  id: string; // UUID (Primary Key)
+  menuId: string; // UUID (Foreign Key to Menu)
+  name: string; // TEXT (Tên món ăn/uống)
   description?: string;
-  category: string; // TEXT, e.g., "Coffee", "Pastries"
-  price: number; // DECIMAL(10,2)
-  unit: string; // TEXT, e.g., "ly", "chai", "đĩa"
-  imageUrl?: string;
-  options?: MenuItemOption[]; // Array of configurable options
+  category: string; // TEXT (Phân loại món: cà phê, trà sữa...)
+  price: number; // DECIMAL(10,2) (Giá bán của món)
+  unit: string; // TEXT (Đơn vị tính: ly, chai, đĩa...)
+  imageUrl?: string; // TEXT
   dataAiHint?: string; // For AI image search
   available: boolean; // Is the item currently available for ordering
   tags?: string[]; // e.g., "vegetarian", "new", "spicy"
   displayOrder?: number; // To control order within a category
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại)
+  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi)
 }
 
-// Client-side cart item structure
+export interface Ingredient {
+  id: string; // UUID (Primary Key)
+  tenantId: string; // UUID (Foreign Key to Tenant)
+  name: string; // TEXT (Tên nguyên liệu: Sữa đặc, cà phê...)
+  description?: string;
+  category?: string; // e.g., "Dairy", "Produce", "Dry Goods"
+  unit: string; // TEXT (Đơn vị tính: ml, gram, chai...)
+  supplierId?: string; // Optional FK to a Supplier entity
+  averageCost?: number; // Average purchase cost per unit
+  lowStockThreshold?: number; // DECIMAL(10,2) (Ngưỡng cảnh báo khi tồn kho thấp, mặc định 0)
+  isPerishable?: boolean;
+  createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại)
+  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi)
+}
+
+export interface Recipe {
+  id: string; // UUID (Primary Key)
+  menuItemId: string; // UUID (Foreign Key to MenuItem)
+  ingredientId: string; // UUID (Foreign Key to Ingredient)
+  quantityNeeded: number; // DECIMAL(10,2) (Số lượng nguyên liệu cần cho 1 đơn vị món)
+  unit?: string; // Denormalized from Ingredient, e.g. "gram", "ml" (useful to keep)
+  notes?: string;
+  createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại)
+  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi)
+}
+
+export interface Inventory {
+  id: string; // UUID (Primary Key)
+  branchId: string; // UUID (Foreign Key to Branch)
+  ingredientId: string; // UUID (Foreign Key to Ingredient)
+  currentQuantity: number; // DECIMAL(10,2) (Số lượng tồn kho hiện tại)
+  unit?: string; // Denormalized from Ingredient for easier display
+  lastStocktakeDate?: Date;
+  notes?: string;
+  createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại)
+  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi currentQuantity thay đổi)
+}
+
+export interface StockMovement {
+  id: string; // UUID (Primary Key)
+  branchId: string; // UUID (Foreign Key to Branch)
+  ingredientId: string; // UUID (Foreign Key to Ingredient)
+  userId?: string; // UUID (Foreign Key to User who performed/recorded movement, Optional)
+  quantity: number; // DECIMAL(10,2) (Số lượng nhập hoặc xuất, âm nếu xuất)
+  unit: string; // Denormalized from Ingredient
+  type: 'purchase_in' | 'transfer_in' | 'production_out' | 'sale_out' | 'spoilage_out' | 'transfer_out' | 'stocktake_adjustment' | string; // TEXT
+  source?: string; // TEXT (Nguồn gốc: nhà cung cấp, bán hàng...)
+  referenceId?: string; // e.g., PurchaseOrder ID, Order ID, Transfer ID
+  notes?: string;
+  createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại)
+  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi)
+}
+
+export interface CafeTable {
+  id: string; // UUID (Primary Key)
+  branchId: string; // UUID (Foreign Key to Branch)
+  tableNumber: string; // TEXT (Số hiệu bàn, ví dụ: "B01")
+  zone?: string; // TEXT (Khu vực: A, B, ngoài trời...)
+  capacity?: number; // INTEGER (Optional)
+  status: TableStatus; // Current operational status
+  isActive: boolean; // BOOLEAN (Bàn đang hoạt động hay không, mặc định: true) - If the table definition is active
+  currentOrderId?: string; // Optional: to link to an active order
+  createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại)
+  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi)
+}
+
+export interface Order {
+  id: string; // UUID (Primary Key)
+  tenantId: string; // UUID (Foreign Key to Tenant)
+  branchId: string; // UUID (Foreign Key to Branch)
+  userId: string; // UUID (Foreign Key to User - creator)
+  tableId?: string; // UUID (Foreign Key to CafeTable - Optional)
+  customerId?: string; // Optional FK to a CustomerLoyalty profile
+  orderNumber?: string; // Human-readable order number
+  status: 'pending' | 'open' | 'preparing' | 'ready' | 'served' | 'paid' | 'completed' | 'cancelled' | 'refunded' | string; // TEXT
+  type: 'dine-in' | 'takeout' | 'delivery';
+  subtotalAmount: number; // Sum of OrderLineItem totalPrices before discounts/taxes
+  discountAmount?: number; // DECIMAL(10,2)
+  taxAmount?: number;
+  serviceChargeAmount?: number;
+  totalAmount: number; // DECIMAL(10,2) (Tổng số tiền đơn hàng)
+  paymentMethod?: string; // TEXT (cash, qr, transfer...)
+  paymentTransactionId?: string; // ID from payment gateway
+  notes?: string; // General notes for the order
+  createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại)
+  paidAt?: Date; // TIMESTAMP (Optional - Thời điểm thanh toán)
+  completedAt?: Date; // When order reached a final state (paid/completed/cancelled)
+  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi)
+}
+
+// Renamed from OrderLineItem to match new spec "Order Items" for persisted items
+export interface PersistedOrderItem {
+  id: string; // UUID (Primary Key)
+  orderId: string; // UUID (Foreign Key to Order)
+  menuItemId: string; // UUID (Foreign Key to MenuItem)
+  menuItemName?: string; // Denormalized for convenience
+  quantity: number; // INTEGER (Số lượng món)
+  unitPrice: number; // DECIMAL(10,2) (Giá của một đơn vị món tại thời điểm đặt hàng)
+  itemSubtotal?: number; // quantity * unitPrice (can include option price adjustments in more complex scenarios)
+  notes?: string; // TEXT (Ghi chú cho món: ít đường, không đá..., Optional)
+  // For more complex scenarios with options:
+  // selectedOptions?: Array<{
+  //   optionId: string;
+  //   optionName: string;
+  //   choiceId: string;
+  //   choiceName: string;
+  //   additionalPrice?: number;
+  // }>;
+  createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại)
+  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi)
+}
+
+// Client-side cart item structure - kept distinct
 export interface OrderItem extends MenuItem {
   cartItemId: string; // Unique ID for the item in the cart
   quantity: number;
   notes?: string;
-  // Record of selected optionId to choiceId (or choiceName if simpler for UI)
   selectedOptions?: Record<string, string>; // e.g. { "option_size": "choice_large", "option_milk": "choice_almond" }
   calculatedPrice: number; // MenuItem.price + sum of selected options' additionalPrice
 }
 
+// New Entities
 
-export interface Order {
-  id: string; // UUID
-  tenantId: string; // UUID, FK to Tenant
-  branchId: string; // UUID, FK to Branch
-  userId: string; // UUID, FK to User (creator)
-  customerId?: string; // Optional FK to a customer profile
-  tableId?: string; // UUID, FK to CafeTable (optional for takeout/delivery)
-  orderNumber?: string; // Human-readable order number (e.g., daily sequence)
-  status: 'pending' | 'open' | 'preparing' | 'ready' | 'served' | 'paid' | 'completed' | 'cancelled' | 'refunded' | string; // TEXT, default 'open' or 'pending'
-  type: 'dine-in' | 'takeout' | 'delivery';
-  subtotalAmount: number; // Sum of OrderLineItem totalPrices before discounts/taxes
-  discountAmount?: number;
-  taxAmount?: number;
-  serviceChargeAmount?: number;
-  totalAmount: number; // DECIMAL(10,2), final amount to be paid
-  paymentMethod?: string; // TEXT, e.g., "cash", "qr", "card_visa_1234"
-  paymentTransactionId?: string; // ID from payment gateway
-  notes?: string; // General notes for the order
-  createdAt: Date; // TIMESTAMP
-  updatedAt: Date; // TIMESTAMP
-  completedAt?: Date; // When order reached a final state (paid/completed/cancelled)
-  // OrderLineItems can be a subcollection in Firestore or an array in the document.
-  // If an array, it might be 'items: OrderLineItem[];'
+export interface Payment {
+  id: string; // UUID (Primary Key)
+  orderId: string; // UUID (Foreign Key to Order)
+  paymentMethod: string; // TEXT
+  amount: number; // DECIMAL(10,2)
+  transactionId?: string; // TEXT (Optional)
+  createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại)
+  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi)
 }
 
-export interface OrderLineItem {
-  id: string; // Document ID if subcollection, or unique string if array element
-  // orderId is implicit if subcollection, explicit if separate collection
-  menuItemId: string; // UUID, FK to MenuItem
-  menuItemName: string; // Denormalized
-  quantity: number; // INTEGER
-  unitPrice: number; // Price of one unit of the menu item at the time of order (before options)
-  selectedOptions?: Array<{
-    optionId: string;
-    optionName: string;
-    choiceId: string;
-    choiceName: string;
-    additionalPrice?: number;
-  }>; // Denormalized selected options
-  itemSubtotal: number; // quantity * (unitPrice + sum of selected options' additionalPrice)
-  notes?: string; // TEXT, e.g., "extra_shot", "no_ice"
-  // status?: 'pending' | 'preparing' | 'ready' | 'served' | 'cancelled'; // Optional: per-item status
+export interface DiscountPromotion {
+  id: string; // UUID (Primary Key)
+  tenantId: string; // UUID (Foreign Key to Tenant)
+  name: string; // TEXT
+  type: 'percentage' | 'fixed_amount' | string; // TEXT
+  value: number; // DECIMAL(10,2)
+  minOrderValue?: number; // DECIMAL(10,2) (Optional)
+  startDate: Date; // TIMESTAMP
+  endDate: Date; // TIMESTAMP
+  isActive: boolean; // BOOLEAN
+  appliesTo?: 'all_orders' | 'specific_items' | 'specific_categories' | string; // TEXT
+  // applicableItemIds?: string[]; // If applies_to is 'specific_items'
+  // applicableCategoryNames?: string[]; // If applies_to is 'specific_categories'
+  createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại)
+  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi)
 }
 
-
-export interface Ingredient {
-  id: string; // UUID
-  tenantId: string; // UUID, FK to Tenant
-  name: string; // TEXT, e.g., "Sữa đặc"
-  description?: string;
-  category?: string; // e.g., "Dairy", "Produce", "Dry Goods"
-  unit: string; // TEXT, e.g., "ml", "gram", "kg", "item"
-  supplierId?: string; // Optional FK to a Supplier entity
-  averageCost?: number; // Average purchase cost per unit
-  lowStockThreshold?: number; // DECIMAL(10,2), default 0
-  isPerishable?: boolean;
-  createdAt: Date;
-  updatedAt: Date;
+export interface CustomerLoyalty {
+  id: string; // UUID (Primary Key)
+  tenantId: string; // UUID (Foreign Key to Tenant)
+  name: string; // TEXT
+  phoneNumber: string; // TEXT
+  email?: string; // TEXT (Optional)
+  totalPoints: number; // DECIMAL(10,2)
+  // address?: string;
+  // birthDate?: Date;
+  createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại)
+  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi)
 }
 
-export interface InventoryItem {
-  id: string; // Could be `branchId_ingredientId` or a unique UUID
-  branchId: string; // UUID, FK to Branch
-  ingredientId: string; // UUID, FK to Ingredient
-  quantity: number; // DECIMAL(10,2), current stock level
-  unit: string; // Denormalized from Ingredient for easier display
-  lastStocktakeDate?: Date;
-  notes?: string;
-  lastUpdatedAt: Date; // TIMESTAMP
-}
-
-export interface RecipeItem {
-  id: string; // UUID, or could be part of MenuItem subcollection
-  // menuItemId is implicit if subcollection, or explicit: string;
-  ingredientId: string; // UUID, FK to Ingredient
-  quantity: number; // DECIMAL(10,2), amount of ingredient needed for 1 unit of the MenuItem
-  unit: string; // Denormalized from Ingredient, e.g. "gram", "ml"
-  notes?: string;
-}
-
-export interface StockMovement {
-  id: string; // UUID
-  branchId: string; // UUID, FK to Branch
-  ingredientId: string; // UUID, FK to Ingredient
-  userId: string; // UUID, FK to User who performed/recorded movement
-  quantity: number; // DECIMAL(10,2), positive for IN, negative for OUT
-  unit: string; // Denormalized from Ingredient
-  type: 'purchase_in' | 'transfer_in' | 'production_out' | 'sale_out' | 'spoilage_out' | 'transfer_out' | 'stocktake_adjustment' | string; // TEXT
-  sourceOrDestination?: string; // e.g., Supplier name, other Branch ID, reason for spoilage
-  referenceId?: string; // e.g., PurchaseOrder ID, Order ID, Transfer ID
-  notes?: string;
-  createdAt: Date; // TIMESTAMP
-}
-
-
-// Existing types for specific features - kept as they are not directly part of the new core schema
+// Updated ShiftReport
 export interface ShiftReport {
-  id: string;
-  shiftStart: Date;
-  shiftEnd: Date;
-  totalRevenue: number;
-  transactionsCount: number;
-  paymentMethods: Record<string, number>; // e.g., { cash: 500, card: 1200 }
-  userId: string; // User who owns/closed the shift
-  branchId: string;
-  notes?: string;
+  id: string; // UUID (Primary Key)
+  branchId: string; // UUID (Foreign Key to Branch)
+  userId: string; // UUID (Foreign Key to User)
+  startTime: Date; // TIMESTAMP
+  endTime: Date; // TIMESTAMP
+  totalCashIn: number; // DECIMAL(10,2)
+  totalCardIn: number; // DECIMAL(10,2)
+  totalQrIn: number; // DECIMAL(10,2)
+  // otherPaymentMethodsTotal?: number; // For payment methods not explicitly listed
+  totalRevenue: number; // DECIMAL(10,2)
+  totalTransactions: number; // INTEGER
+  // startingCash?: number; // Cash at the beginning of the shift
+  // endingCash?: number; // Cash at the end of the shift (for reconciliation)
+  notes?: string; // TEXT (Optional)
+  createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại)
+  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi)
 }
 
+
+// Existing types for specific features - kept as they are not directly part of the core schema update
 export interface HistoricalSale {
   date: string; // YYYY-MM-DD
   sales: number;
@@ -220,3 +257,5 @@ export interface PredictedSale {
   date: string; // YYYY-MM-DD
   predictedSales: number;
 }
+
+    

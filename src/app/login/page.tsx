@@ -18,6 +18,9 @@ import { APP_NAME } from '@/lib/constants';
 import { Separator } from '@/components/ui/separator';
 import Link from 'next/link';
 
+// Basic email validation regex
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export default function LoginPage() {
   const router = useRouter();
   const { toast } = useToast();
@@ -33,8 +36,10 @@ export default function LoginPage() {
     const displayName = firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User';
     const photoURL = firebaseUser.photoURL || `https://placehold.co/100x100.png?text=${(displayName).charAt(0).toUpperCase()}`;
 
+    let isNewUser = false;
 
     if (!docSnap.exists()) {
+      isNewUser = true;
       // New user, create document
       const newUser: AppUser = {
         id: firebaseUser.uid,
@@ -48,10 +53,6 @@ export default function LoginPage() {
         updatedAt: serverTimestamp() as unknown as Date,
       };
       await setDoc(userRef, newUser);
-      toast({
-        title: "Welcome!",
-        description: "Your account has been created.",
-      });
     } else {
       // Existing user, potentially update fields like photoURL or last login
       await setDoc(userRef, {
@@ -73,10 +74,17 @@ export default function LoginPage() {
     expiryDate.setDate(expiryDate.getDate() + 1); // Expires in 1 day
     document.cookie = `coffeeos_user_info=${JSON.stringify(cookieData)}; path=/; expires=${expiryDate.toUTCString()}; SameSite=Lax`;
 
-    toast({
-      title: "Sign In Successful",
-      description: `Welcome back, ${cookieData.displayName || 'User'}!`,
-    });
+    if (isNewUser) {
+      toast({
+        title: "Welcome!",
+        description: "Your account has been created.",
+      });
+    } else {
+      toast({
+        title: "Sign In Successful",
+        description: `Welcome back, ${cookieData.displayName || 'User'}!`,
+      });
+    }
     router.push('/dashboard/menu');
   };
 
@@ -104,6 +112,10 @@ export default function LoginPage() {
     e.preventDefault();
     if (!email || !password) {
       toast({ title: "Missing Fields", description: "Please enter both email and password.", variant: "destructive" });
+      return;
+    }
+    if (!EMAIL_REGEX.test(email)) {
+      toast({ title: "Invalid Email Format", description: "Please enter a valid email address.", variant: "destructive" });
       return;
     }
     setIsLoading(true);

@@ -4,8 +4,10 @@
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
-import { auth } from '@/lib/firebase';
+import { auth, db } from '@/lib/firebase'; // Import db
 import { GoogleAuthProvider, signInWithPopup, UserCredential } from 'firebase/auth';
+import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore'; // Import Firestore functions
+import type { User as AppUser } from '@/lib/types'; // Import your User type
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Chrome, Loader2, LogIn } from 'lucide-react';
@@ -22,17 +24,61 @@ export default function LoginPage() {
     const provider = new GoogleAuthProvider();
     try {
       const result: UserCredential = await signInWithPopup(auth, provider);
-      const user = result.user;
-      
-      // Here you could add logic to create/update user in your Firestore database
-      // using user.uid, user.displayName, user.email, user.photoURL
-      // For example, associate user.uid with the firebaseUid field in your User entity.
+      const firebaseUser = result.user;
 
-      toast({
-        title: "Sign In Successful",
-        description: `Welcome back, ${user.displayName || 'User'}!`,
-      });
-      router.push('/dashboard/menu'); 
+      if (firebaseUser) {
+        // 1. Save/Update user in Firestore
+        const userRef = doc(db, 'users', firebaseUser.uid);
+        const docSnap = await getDoc(userRef);
+
+        if (!docSnap.exists()) {
+          // New user, create document
+          const newUser: AppUser = {
+            id: firebaseUser.uid,
+            firebaseUid: firebaseUser.uid,
+            displayName: firebaseUser.displayName || '',
+            email: firebaseUser.email || '',
+            photoURL: firebaseUser.photoURL || '',
+            role: 'customer', // Default role for new sign-ups
+            active: true,
+            createdAt: serverTimestamp() as unknown as Date, // Cast needed for serverTimestamp
+            updatedAt: serverTimestamp() as unknown as Date, // Cast needed for serverTimestamp
+            // tenantId, branchId, username can be set later through a profile completion step
+          };
+          await setDoc(userRef, newUser);
+          toast({
+            title: "Welcome!",
+            description: "Your account has been created.",
+          });
+        } else {
+          // Existing user, potentially update fields like photoURL or last login
+          // For now, we'll just acknowledge they exist
+          await setDoc(userRef, { 
+            photoURL: firebaseUser.photoURL || docSnap.data()?.photoURL,
+            displayName: firebaseUser.displayName || docSnap.data()?.displayName,
+            email: firebaseUser.email || docSnap.data()?.email, // Keep existing email if new one is null
+            updatedAt: serverTimestamp() 
+          }, { merge: true });
+        }
+
+        // 2. Set user information in a cookie (simplified example)
+        const cookieData = {
+          uid: firebaseUser.uid,
+          displayName: firebaseUser.displayName,
+          email: firebaseUser.email,
+          photoURL: firebaseUser.photoURL,
+        };
+        // Set cookie to expire in 1 day
+        const expiryDate = new Date();
+        expiryDate.setDate(expiryDate.getDate() + 1);
+        document.cookie = `coffeeos_user_info=${JSON.stringify(cookieData)}; path=/; expires=${expiryDate.toUTCString()}; SameSite=Lax`;
+        
+        toast({
+          title: "Sign In Successful",
+          description: `Welcome back, ${firebaseUser.displayName || 'User'}!`,
+        });
+        router.push('/dashboard/menu');
+      }
     } catch (error: any) {
       console.error('Error during Google sign-in:', error);
       toast({
@@ -82,8 +128,6 @@ export default function LoginPage() {
         </CardContent>
          <CardFooter className="flex flex-col items-center pt-4 text-xs text-muted-foreground">
             <p>By signing in, you agree to our Terms of Service.</p>
-            {/* Consider adding a Link component here if you have a terms page */}
-            {/* <Link href="/terms" className="underline hover:text-primary">Terms of Service</Link> */}
           </CardFooter>
       </Card>
        <footer className="mt-8 text-center text-sm text-muted-foreground z-10">
@@ -92,3 +136,5 @@ export default function LoginPage() {
     </div>
   );
 }
+
+    

@@ -1,4 +1,5 @@
 
+
 export type TableStatus = 'available' | 'occupied' | 'reserved' | 'cleaning';
 
 // Core Entities based on the provided schema
@@ -22,10 +23,10 @@ export interface Branch {
 
 export interface User {
   id: string; // UUID (Primary Key)
-  tenantId: string; // UUID (Foreign Key to Tenant)
-  branchId: string; // UUID (Foreign Key to Branch)
-  username: string; // TEXT (Tên đăng nhập, duy nhất trong một chi nhánh)
-  role: 'staff' | 'cashier' | 'manager' | 'admin' | string; // TEXT (Vai trò người dùng)
+  tenantId?: string; // UUID (Foreign Key to Tenant) - Optional for users not yet assigned
+  branchId?: string; // UUID (Foreign Key to Branch) - Optional for users not yet assigned
+  username?: string; // TEXT (Tên đăng nhập, duy nhất trong một chi nhánh) - Optional
+  role?: 'staff' | 'cashier' | 'manager' | 'admin' | 'customer' | string; // TEXT (Vai trò người dùng) - Optional, 'customer' for general sign-ins
   hashedPinCode?: string; // TEXT (Mã PIN đăng nhập POS, bảo mật)
   active: boolean; // BOOLEAN (Trạng thái hoạt động của tài khoản, mặc định: true)
   email?: string; // For Firebase Auth linkage
@@ -177,15 +178,14 @@ export interface OrderItem extends MenuItem {
   calculatedPrice: number; // MenuItem.price + sum of selected options' additionalPrice
 }
 
-
 export interface Payment {
   id: string; // UUID (Primary Key)
   orderId: string; // UUID (Foreign Key to Order)
   paymentMethod: string; // TEXT
   amount: number; // DECIMAL(10,2)
   transactionId?: string; // TEXT (Optional)
-  createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại) - Đây là thời điểm diễn ra giao dịch thanh toán.
-  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi, ví dụ khi có điều chỉnh thanh toán)
+  createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại)
+  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi)
 }
 
 export interface DiscountPromotion {
@@ -199,8 +199,6 @@ export interface DiscountPromotion {
   endDate: Date; // TIMESTAMP
   isActive: boolean; // BOOLEAN
   appliesTo?: 'all_orders' | 'specific_items' | 'specific_categories' | string; // TEXT
-  // applicableItemIds?: string[]; // If applies_to is 'specific_items'
-  // applicableCategoryNames?: string[]; // If applies_to is 'specific_categories'
   createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại)
   updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi)
 }
@@ -212,12 +210,9 @@ export interface CustomerLoyalty {
   phoneNumber: string; // TEXT
   email?: string; // TEXT (Optional)
   totalPoints: number; // DECIMAL(10,2)
-  // address?: string;
-  // birthDate?: Date;
   createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại)
-  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi, ví dụ khi điểm tích lũy thay đổi)
+  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi)
 }
-
 
 export interface ShiftReport {
   id: string; // UUID (Primary Key)
@@ -228,12 +223,11 @@ export interface ShiftReport {
   totalCashIn: number; // DECIMAL(10,2)
   totalCardIn: number; // DECIMAL(10,2)
   totalQrIn: number; // DECIMAL(10,2)
-  // otherPaymentMethodsTotal?: number; // For payment methods not explicitly listed
   totalRevenue: number; // DECIMAL(10,2)
   totalTransactions: number; // INTEGER
   notes?: string; // TEXT (Optional)
-  createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại) - Thường là thời điểm báo cáo ca được tạo (khi ca kết thúc).
-  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi, ví dụ khi quản lý điều chỉnh báo cáo)
+  createdAt: Date; // TIMESTAMP (Mặc định: thời gian hiện tại)
+  updatedAt: Date; // TIMESTAMP (Cập nhật tự động khi bản ghi thay đổi)
 }
 
 
@@ -247,3 +241,5 @@ export interface PredictedSale {
   date: string; // YYYY-MM-DD
   predictedSales: number;
 }
+
+    

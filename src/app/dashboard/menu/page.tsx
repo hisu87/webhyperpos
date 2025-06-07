@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState } from 'react';
@@ -49,9 +50,10 @@ export default function MenuPage() {
       return;
     }
     console.log('Checking out with:', paymentMethod, orderItems);
+    const orderTotalWithTax = orderItems.reduce((sum, item) => sum + item.price * item.quantity, 0) * 1.08;
     toast({ 
         title: "Checkout Successful!", 
-        description: `Paid with ${paymentMethod}. Order total: $${orderItems.reduce((sum, item) => sum + item.price * item.quantity, 0) * 1.08 /* with tax */toFixed(2)}`
+        description: `Paid with ${paymentMethod}. Order total: $${orderTotalWithTax.toFixed(2)}`
     });
     setOrderItems([]); // Clear order after checkout
   };

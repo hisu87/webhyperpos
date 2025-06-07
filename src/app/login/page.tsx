@@ -29,39 +29,39 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
 
   const processUserSignIn = async (firebaseUser: FirebaseUser) => {
-    // 1. Save/Update user in Firestore
-    const userRef = doc(db, 'users', firebaseUser.uid);
-    const docSnap = await getDoc(userRef);
+    // 1. Save/Update user in Firestore (Temporarily Disabled)
+    // const userRef = doc(db, 'users', firebaseUser.uid);
+    // const docSnap = await getDoc(userRef);
 
     const displayName = firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User';
     const photoURL = firebaseUser.photoURL || `https://placehold.co/100x100.png?text=${(displayName).charAt(0).toUpperCase()}`;
 
-    let isNewUser = false;
+    // let isNewUser = false; // Temporarily disabling new user check as it depends on Firestore
 
-    if (!docSnap.exists()) {
-      isNewUser = true;
-      // New user, create document
-      const newUser: AppUser = {
-        id: firebaseUser.uid,
-        firebaseUid: firebaseUser.uid,
-        displayName: displayName,
-        email: firebaseUser.email || '',
-        photoURL: photoURL,
-        role: 'customer', // Default role for new sign-ups
-        active: true,
-        createdAt: serverTimestamp() as unknown as Date,
-        updatedAt: serverTimestamp() as unknown as Date,
-      };
-      await setDoc(userRef, newUser);
-    } else {
-      // Existing user, potentially update fields like photoURL or last login
-      await setDoc(userRef, {
-        displayName: displayName || docSnap.data()?.displayName,
-        email: firebaseUser.email || docSnap.data()?.email, 
-        photoURL: photoURL || docSnap.data()?.photoURL,
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
-    }
+    // if (!docSnap.exists()) {
+    //   isNewUser = true;
+    //   // New user, create document
+    //   const newUser: AppUser = {
+    //     id: firebaseUser.uid,
+    //     firebaseUid: firebaseUser.uid,
+    //     displayName: displayName,
+    //     email: firebaseUser.email || '',
+    //     photoURL: photoURL,
+    //     role: 'customer', // Default role for new sign-ups
+    //     active: true,
+    //     createdAt: serverTimestamp() as unknown as Date,
+    //     updatedAt: serverTimestamp() as unknown as Date,
+    //   };
+    //   await setDoc(userRef, newUser);
+    // } else {
+    //   // Existing user, potentially update fields like photoURL or last login
+    //   await setDoc(userRef, {
+    //     displayName: displayName || docSnap.data()?.displayName,
+    //     email: firebaseUser.email || docSnap.data()?.email, 
+    //     photoURL: photoURL || docSnap.data()?.photoURL,
+    //     updatedAt: serverTimestamp(),
+    //   }, { merge: true });
+    // }
 
     // 2. Set user information in a cookie
     const cookieData = {
@@ -74,17 +74,22 @@ export default function LoginPage() {
     expiryDate.setDate(expiryDate.getDate() + 1); // Expires in 1 day
     document.cookie = `coffeeos_user_info=${JSON.stringify(cookieData)}; path=/; expires=${expiryDate.toUTCString()}; SameSite=Lax`;
 
-    if (isNewUser) {
-      toast({
-        title: "Welcome!",
-        description: "Your account has been created.",
-      });
-    } else {
-      toast({
-        title: "Sign In Successful",
-        description: `Welcome back, ${cookieData.displayName || 'User'}!`,
-      });
-    }
+    // Temporarily using a generic success message since new user check is disabled
+    toast({
+      title: "Sign In Successful",
+      description: `Welcome back, ${cookieData.displayName || 'User'}! (Firestore save is temporarily disabled)`,
+    });
+    // if (isNewUser) {
+    //   toast({
+    //     title: "Welcome!",
+    //     description: "Your account has been created.",
+    //   });
+    // } else {
+    //   toast({
+    //     title: "Sign In Successful",
+    //     description: `Welcome back, ${cookieData.displayName || 'User'}!`,
+    //   });
+    // }
     router.push('/dashboard/menu');
   };
 

@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { auth, db } from '@/lib/firebase';
 import { createUserWithEmailAndPassword, updateProfile, User as FirebaseUser } from 'firebase/auth';
-import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import type { User as AppUser } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
@@ -17,6 +17,9 @@ import { useToast } from "@/hooks/use-toast";
 import { APP_NAME } from '@/lib/constants';
 import Link from 'next/link';
 
+// Basic email validation regex
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export default function RegisterPage() {
   const router = useRouter();
   const { toast } = useToast();
@@ -26,7 +29,7 @@ export default function RegisterPage() {
   const [displayName, setDisplayName] = useState('');
 
   const processUserRegistration = async (firebaseUser: FirebaseUser, displayNameInput: string) => {
-    const userRef = doc(db, 'users', firebaseUser.uid);
+    // const userRef = doc(db, 'users', firebaseUser.uid); // Temporarily Disabled
     const displayNameForProfile = displayNameInput || firebaseUser.email?.split('@')[0] || 'New User';
 
     // Update Firebase Auth profile if displayName was provided
@@ -39,25 +42,25 @@ export default function RegisterPage() {
       }
     }
     
-    const newUser: AppUser = {
-      id: firebaseUser.uid,
-      firebaseUid: firebaseUser.uid,
-      displayName: displayNameForProfile,
-      email: firebaseUser.email || '',
-      photoURL: firebaseUser.photoURL || `https://placehold.co/100x100.png?text=${displayNameForProfile.charAt(0).toUpperCase()}`,
-      role: 'customer', // Default role for new sign-ups
-      active: true,
-      createdAt: serverTimestamp() as unknown as Date,
-      updatedAt: serverTimestamp() as unknown as Date,
-    };
-    await setDoc(userRef, newUser);
+    // const newUser: AppUser = { // Temporarily Disabled
+    //   id: firebaseUser.uid,
+    //   firebaseUid: firebaseUser.uid,
+    //   displayName: displayNameForProfile,
+    //   email: firebaseUser.email || '',
+    //   photoURL: firebaseUser.photoURL || `https://placehold.co/100x100.png?text=${displayNameForProfile.charAt(0).toUpperCase()}`,
+    //   role: 'customer', // Default role for new sign-ups
+    //   active: true,
+    //   createdAt: serverTimestamp() as unknown as Date,
+    //   updatedAt: serverTimestamp() as unknown as Date,
+    // };
+    // await setDoc(userRef, newUser); // Temporarily Disabled
 
     // Set user information in a cookie
     const cookieData = {
       uid: firebaseUser.uid,
       displayName: displayNameForProfile,
       email: firebaseUser.email,
-      photoURL: newUser.photoURL,
+      photoURL: firebaseUser.photoURL || `https://placehold.co/100x100.png?text=${displayNameForProfile.charAt(0).toUpperCase()}`, // Use photoURL from FirebaseUser or generate placeholder
     };
     const expiryDate = new Date();
     expiryDate.setDate(expiryDate.getDate() + 1); // Expires in 1 day
@@ -65,7 +68,7 @@ export default function RegisterPage() {
 
     toast({
       title: "Registration Successful!",
-      description: `Welcome, ${displayNameForProfile}! Your account has been created.`,
+      description: `Welcome, ${displayNameForProfile}! Your account has been created. (Firestore save is temporarily disabled)`,
     });
     router.push('/dashboard/menu');
   };
@@ -74,6 +77,10 @@ export default function RegisterPage() {
     e.preventDefault();
     if (!email || !password) {
       toast({ title: "Missing Fields", description: "Please enter email and password.", variant: "destructive" });
+      return;
+    }
+     if (!EMAIL_REGEX.test(email)) {
+      toast({ title: "Invalid Email Format", description: "Please enter a valid email address.", variant: "destructive" });
       return;
     }
     if (password.length < 6) {

@@ -12,10 +12,11 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Chrome, Loader2, LogIn, Mail } from 'lucide-react';
+import { Chrome, Loader2, LogIn, Mail, UserPlus } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 import { APP_NAME } from '@/lib/constants';
 import { Separator } from '@/components/ui/separator';
+import Link from 'next/link';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -29,14 +30,18 @@ export default function LoginPage() {
     const userRef = doc(db, 'users', firebaseUser.uid);
     const docSnap = await getDoc(userRef);
 
+    const displayName = firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User';
+    const photoURL = firebaseUser.photoURL || `https://placehold.co/100x100.png?text=${(displayName).charAt(0).toUpperCase()}`;
+
+
     if (!docSnap.exists()) {
       // New user, create document
       const newUser: AppUser = {
         id: firebaseUser.uid,
         firebaseUid: firebaseUser.uid,
-        displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'New User',
+        displayName: displayName,
         email: firebaseUser.email || '',
-        photoURL: firebaseUser.photoURL || `https://placehold.co/100x100.png?text=${(firebaseUser.displayName || firebaseUser.email || 'U').charAt(0)}`,
+        photoURL: photoURL,
         role: 'customer', // Default role for new sign-ups
         active: true,
         createdAt: serverTimestamp() as unknown as Date,
@@ -50,9 +55,9 @@ export default function LoginPage() {
     } else {
       // Existing user, potentially update fields like photoURL or last login
       await setDoc(userRef, {
-        displayName: firebaseUser.displayName || docSnap.data()?.displayName,
-        email: firebaseUser.email || docSnap.data()?.email, // Keep existing email if new one is null
-        photoURL: firebaseUser.photoURL || docSnap.data()?.photoURL,
+        displayName: displayName || docSnap.data()?.displayName,
+        email: firebaseUser.email || docSnap.data()?.email, 
+        photoURL: photoURL || docSnap.data()?.photoURL,
         updatedAt: serverTimestamp(),
       }, { merge: true });
     }
@@ -60,9 +65,9 @@ export default function LoginPage() {
     // 2. Set user information in a cookie
     const cookieData = {
       uid: firebaseUser.uid,
-      displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0],
+      displayName: displayName,
       email: firebaseUser.email,
-      photoURL: firebaseUser.photoURL,
+      photoURL: photoURL,
     };
     const expiryDate = new Date();
     expiryDate.setDate(expiryDate.getDate() + 1); // Expires in 1 day
@@ -221,9 +226,16 @@ export default function LoginPage() {
             Sign In with Google
           </Button>
         </CardContent>
-        <CardFooter className="flex flex-col items-center pt-4 text-xs text-muted-foreground">
-          <p>By signing in, you agree to our Terms of Service.</p>
-          {/* TODO: Add link to sign up page if needed */}
+        <CardFooter className="flex flex-col items-center space-y-2 pt-4 text-sm text-muted-foreground">
+           <p>
+            Don't have an account?{' '}
+            <Button variant="link" asChild className="p-0 h-auto">
+              <Link href="/register">
+                <UserPlus className="mr-1 h-4 w-4" /> Sign Up
+              </Link>
+            </Button>
+          </p>
+          <p className="text-xs">By signing in, you agree to our Terms of Service.</p>
         </CardFooter>
       </Card>
       <footer className="mt-8 text-center text-sm text-muted-foreground z-10">
@@ -232,3 +244,4 @@ export default function LoginPage() {
     </div>
   );
 }
+

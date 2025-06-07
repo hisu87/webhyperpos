@@ -18,7 +18,6 @@ import { APP_NAME } from '@/lib/constants';
 import { Separator } from '@/components/ui/separator';
 import Link from 'next/link';
 
-// Basic email validation regex
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function LoginPage() {
@@ -29,32 +28,30 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
 
   const processUserSignIn = async (firebaseUser: FirebaseUser) => {
-    // 1. Save/Update user in Firestore (Temporarily Disabled)
+    // Firestore save is temporarily disabled
     // const userRef = doc(db, 'users', firebaseUser.uid);
     // const docSnap = await getDoc(userRef);
 
     const displayName = firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User';
-    const photoURL = firebaseUser.photoURL || `https://placehold.co/100x100.png?text=${(displayName).charAt(0).toUpperCase()}`;
+    // const photoURL = firebaseUser.photoURL || `https://placehold.co/100x100.png?text=${(displayName).charAt(0).toUpperCase()}`;
 
-    // let isNewUser = false; // Temporarily disabling new user check as it depends on Firestore
+    // let isNewUser = false; 
 
     // if (!docSnap.exists()) {
     //   isNewUser = true;
-    //   // New user, create document
     //   const newUser: AppUser = {
     //     id: firebaseUser.uid,
     //     firebaseUid: firebaseUser.uid,
     //     displayName: displayName,
     //     email: firebaseUser.email || '',
     //     photoURL: photoURL,
-    //     role: 'customer', // Default role for new sign-ups
+    //     role: 'customer', 
     //     active: true,
     //     createdAt: serverTimestamp() as unknown as Date,
     //     updatedAt: serverTimestamp() as unknown as Date,
     //   };
     //   await setDoc(userRef, newUser);
     // } else {
-    //   // Existing user, potentially update fields like photoURL or last login
     //   await setDoc(userRef, {
     //     displayName: displayName || docSnap.data()?.displayName,
     //     email: firebaseUser.email || docSnap.data()?.email, 
@@ -63,21 +60,16 @@ export default function LoginPage() {
     //   }, { merge: true });
     // }
 
-    // 2. Set user information in a cookie
-    const cookieData = {
-      uid: firebaseUser.uid,
-      displayName: displayName,
-      email: firebaseUser.email,
-      photoURL: photoURL,
-    };
-    const expiryDate = new Date();
-    expiryDate.setDate(expiryDate.getDate() + 1); // Expires in 1 day
-    document.cookie = `coffeeos_user_info=${JSON.stringify(cookieData)}; path=/; expires=${expiryDate.toUTCString()}; SameSite=Lax`;
-
+    try {
+      localStorage.setItem('loginTimestamp', Date.now().toString());
+    } catch (e) {
+      console.warn('localStorage not available, 4-hour session expiry may not work as expected.');
+    }
+    
     // Temporarily using a generic success message since new user check is disabled
     toast({
       title: "Sign In Successful",
-      description: `Welcome back, ${cookieData.displayName || 'User'}! (Firestore save is temporarily disabled)`,
+      description: `Welcome back, ${displayName || 'User'}! (Firestore save is temporarily disabled)`,
     });
     // if (isNewUser) {
     //   toast({
@@ -87,7 +79,7 @@ export default function LoginPage() {
     // } else {
     //   toast({
     //     title: "Sign In Successful",
-    //     description: `Welcome back, ${cookieData.displayName || 'User'}!`,
+    //     description: `Welcome back, ${displayName || 'User'}!`,
     //   });
     // }
     router.push('/dashboard/menu');
@@ -261,4 +253,3 @@ export default function LoginPage() {
     </div>
   );
 }
-

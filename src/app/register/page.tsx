@@ -17,7 +17,6 @@ import { useToast } from "@/hooks/use-toast";
 import { APP_NAME } from '@/lib/constants';
 import Link from 'next/link';
 
-// Basic email validation regex
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function RegisterPage() {
@@ -32,13 +31,11 @@ export default function RegisterPage() {
     // const userRef = doc(db, 'users', firebaseUser.uid); // Temporarily Disabled
     const displayNameForProfile = displayNameInput || firebaseUser.email?.split('@')[0] || 'New User';
 
-    // Update Firebase Auth profile if displayName was provided
     if (displayNameInput && firebaseUser.displayName !== displayNameInput) {
       try {
         await updateProfile(firebaseUser, { displayName: displayNameInput });
       } catch (profileError) {
         console.warn("Could not update Firebase Auth profile display name:", profileError);
-        // Continue even if profile update fails, Firestore is primary
       }
     }
     
@@ -48,23 +45,18 @@ export default function RegisterPage() {
     //   displayName: displayNameForProfile,
     //   email: firebaseUser.email || '',
     //   photoURL: firebaseUser.photoURL || `https://placehold.co/100x100.png?text=${displayNameForProfile.charAt(0).toUpperCase()}`,
-    //   role: 'customer', // Default role for new sign-ups
+    //   role: 'customer', 
     //   active: true,
     //   createdAt: serverTimestamp() as unknown as Date,
     //   updatedAt: serverTimestamp() as unknown as Date,
     // };
     // await setDoc(userRef, newUser); // Temporarily Disabled
 
-    // Set user information in a cookie
-    const cookieData = {
-      uid: firebaseUser.uid,
-      displayName: displayNameForProfile,
-      email: firebaseUser.email,
-      photoURL: firebaseUser.photoURL || `https://placehold.co/100x100.png?text=${displayNameForProfile.charAt(0).toUpperCase()}`, // Use photoURL from FirebaseUser or generate placeholder
-    };
-    const expiryDate = new Date();
-    expiryDate.setDate(expiryDate.getDate() + 1); // Expires in 1 day
-    document.cookie = `coffeeos_user_info=${JSON.stringify(cookieData)}; path=/; expires=${expiryDate.toUTCString()}; SameSite=Lax`;
+    try {
+      localStorage.setItem('loginTimestamp', Date.now().toString());
+    } catch (e) {
+      console.warn('localStorage not available, 4-hour session expiry may not work as expected.');
+    }
 
     toast({
       title: "Registration Successful!",

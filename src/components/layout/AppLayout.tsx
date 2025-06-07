@@ -1,6 +1,10 @@
+
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { useRouter, usePathname } from 'next/navigation';
+import { auth } from '@/lib/firebase';
+import type { User as FirebaseUser } from 'firebase/auth';
 import {
   SidebarProvider,
   Sidebar,
@@ -22,12 +26,102 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Bell, LogOut, UserCircle, Settings, HelpCircle } from 'lucide-react';
+import { Bell, LogOut, UserCircle, Settings, HelpCircle, Loader2 } from 'lucide-react';
 import { Logo } from '@/components/icons/Logo';
 import { NAV_LINKS } from '@/lib/constants';
 import { NavLink } from './NavLink';
 
+const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
+
 export function AppLayout({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
+  const [isLoadingUser, setIsLoadingUser] = useState(true);
+
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      if (user) {
+        setCurrentUser(user);
+        const loginTimestampStr = localStorage.getItem('loginTimestamp');
+        if (loginTimestampStr) {
+          const loginTimestamp = parseInt(loginTimestampStr, 10);
+          if (Date.now() - loginTimestamp > FOUR_HOURS_MS) {
+            auth.signOut().then(() => {
+              localStorage.removeItem('loginTimestamp');
+              router.push('/login?reason=sessionExpired');
+            });
+            return; 
+          }
+        } else {
+          // If there's a Firebase user but no loginTimestamp, it implies an old session or manipulation.
+          // Forcing re-login ensures the timestamp is set.
+           if (pathname !== '/login' && pathname !== '/register') {
+             auth.signOut().then(() => {
+               router.push('/login?reason=missingTimestamp');
+             });
+             return;
+           }
+        }
+      } else {
+        setCurrentUser(null);
+        if (pathname !== '/login' && pathname !== '/register') {
+          router.push('/login');
+        }
+      }
+      setIsLoadingUser(false);
+    });
+
+    return () => unsubscribe();
+  }, [router, pathname]);
+
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      if (auth.currentUser) {
+        const loginTimestampStr = localStorage.getItem('loginTimestamp');
+        if (loginTimestampStr) {
+          const loginTimestamp = parseInt(loginTimestampStr, 10);
+          if (Date.now() - loginTimestamp > FOUR_HOURS_MS) {
+            auth.signOut().then(() => {
+              localStorage.removeItem('loginTimestamp');
+              router.push('/login?reason=sessionExpiredInterval');
+            });
+          }
+        }
+      }
+    }, 60 * 1000); // Check every minute
+
+    return () => clearInterval(intervalId);
+  }, [router]);
+
+  if (isLoadingUser && !pathname.startsWith('/login') && !pathname.startsWith('/register')) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background">
+        <Loader2 className="h-12 w-12 animate-spin text-primary" />
+        <p className="ml-4 text-lg text-foreground">Loading CoffeeOS...</p>
+      </div>
+    );
+  }
+
+  // If not loading and no user, and trying to access a protected route,
+  // onAuthStateChanged should have redirected. This is a safeguard.
+  if (!isLoadingUser && !currentUser && !pathname.startsWith('/login') && !pathname.startsWith('/register')) {
+     // This typically means the redirect is in progress or auth state is truly null.
+     // Returning null or a minimal loader can prevent flashing protected content.
+    return (
+        <div className="flex h-screen items-center justify-center bg-background">
+             <Loader2 className="h-12 w-12 animate-spin text-primary" />
+             <p className="ml-4 text-lg text-foreground">Redirecting to login...</p>
+        </div>
+    );
+  }
+  
+  // Allow login/register pages to render without full AppLayout if no user
+  if (!currentUser && (pathname.startsWith('/login') || pathname.startsWith('/register'))) {
+    return <>{children}</>;
+  }
+
+
   return (
     <SidebarProvider defaultOpen>
       <Sidebar variant="sidebar" collapsible="icon">
@@ -59,7 +153,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             <Button variant="ghost" size="icon" aria-label="Notifications">
               <Bell className="h-5 w-5" />
             </Button>
-            <UserMenu />
+            <UserMenu user={currentUser} />
           </div>
         </header>
         <main className="flex-1 overflow-auto p-4 md:p-6">
@@ -70,15 +164,38 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   );
 }
 
-function UserMenu() {
+function UserMenu({ user }: { user: FirebaseUser | null }) {
+  const router = useRouter();
+
+  const handleLogout = () => {
+    auth.signOut().then(() => {
+      try {
+        localStorage.removeItem('loginTimestamp');
+      } catch (e) {
+        console.warn('localStorage not available during logout.');
+      }
+      router.push('/login');
+    });
+  };
+
+  if (!user) {
+    // This case should ideally not be hit if AppLayout correctly gates content,
+    // but as a fallback, provide a sign-in button or nothing.
+    return (
+      <Button variant="ghost" onClick={() => router.push('/login')}>
+        Sign In
+      </Button>
+    );
+  }
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" className="relative h-9 w-9 rounded-full">
           <Avatar className="h-9 w-9">
-            <AvatarImage src="https://placehold.co/100x100.png" alt="User Avatar" data-ai-hint="user avatar" />
+            <AvatarImage src={user.photoURL || "https://placehold.co/100x100.png"} alt={user.displayName || "User Avatar"} data-ai-hint="user avatar" />
             <AvatarFallback>
-              <UserCircle />
+              {user.displayName ? user.displayName.charAt(0).toUpperCase() : <UserCircle />}
             </AvatarFallback>
           </Avatar>
         </Button>
@@ -86,18 +203,18 @@ function UserMenu() {
       <DropdownMenuContent className="w-56" align="end" forceMount>
         <DropdownMenuLabel className="font-normal">
           <div className="flex flex-col space-y-1">
-            <p className="text-sm font-medium leading-none">Cafe Owner</p>
+            <p className="text-sm font-medium leading-none">{user.displayName || "User"}</p>
             <p className="text-xs leading-none text-muted-foreground">
-              owner@example.com
+              {user.email || "No email"}
             </p>
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem>
+        <DropdownMenuItem onClick={() => router.push('/dashboard/profile')}>
           <UserCircle className="mr-2 h-4 w-4" />
           <span>Profile</span>
         </DropdownMenuItem>
-        <DropdownMenuItem>
+        <DropdownMenuItem onClick={() => router.push('/dashboard/settings')}>
           <Settings className="mr-2 h-4 w-4" />
           <span>Settings</span>
         </DropdownMenuItem>
@@ -106,7 +223,7 @@ function UserMenu() {
           <span>Support</span>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem>
+        <DropdownMenuItem onClick={handleLogout}>
           <LogOut className="mr-2 h-4 w-4" />
           <span>Log out</span>
         </DropdownMenuItem>

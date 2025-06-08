@@ -28,39 +28,45 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
 
   const processUserSignIn = async (firebaseUser: FirebaseUser) => {
+    // Step 1: Log all Firebase user info to console
     console.log("Firebase User Object (All Info):", firebaseUser);
     
-    // Firestore save is temporarily disabled
-    // const userRef = doc(db, 'users', firebaseUser.uid);
-    // const docSnap = await getDoc(userRef);
+    // Step 2: "Save info" - currently this means setting a login timestamp in localStorage.
+    // Firestore save logic is temporarily disabled as per previous request.
+    // To re-enable Firestore saving, uncomment the following block and ensure 'isNewUser' logic for toast is also updated:
+    /*
+    const userRef = doc(db, 'users', firebaseUser.uid);
+    const docSnap = await getDoc(userRef);
 
     const displayName = firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User';
-    // const photoURL = firebaseUser.photoURL || `https://placehold.co/100x100.png?text=${(displayName).charAt(0).toUpperCase()}`;
+    const photoURL = firebaseUser.photoURL || `https://placehold.co/100x100.png?text=${(displayName).charAt(0).toUpperCase()}`;
 
-    // let isNewUser = false; 
+    let isNewUser = false; 
 
-    // if (!docSnap.exists()) {
-    //   isNewUser = true;
-    //   const newUser: AppUser = {
-    //     id: firebaseUser.uid,
-    //     firebaseUid: firebaseUser.uid,
-    //     displayName: displayName,
-    //     email: firebaseUser.email || '',
-    //     photoURL: photoURL,
-    //     role: 'customer', 
-    //     active: true,
-    //     createdAt: serverTimestamp() as unknown as Date,
-    //     updatedAt: serverTimestamp() as unknown as Date,
-    //   };
-    //   await setDoc(userRef, newUser);
-    // } else {
-    //   await setDoc(userRef, {
-    //     displayName: displayName || docSnap.data()?.displayName,
-    //     email: firebaseUser.email || docSnap.data()?.email, 
-    //     photoURL: photoURL || docSnap.data()?.photoURL,
-    //     updatedAt: serverTimestamp(),
-    //   }, { merge: true });
-    // }
+    if (!docSnap.exists()) {
+      isNewUser = true;
+      const newUser: AppUser = {
+        id: firebaseUser.uid,
+        firebaseUid: firebaseUser.uid,
+        displayName: displayName,
+        email: firebaseUser.email || '',
+        photoURL: photoURL,
+        role: 'customer', 
+        active: true,
+        createdAt: serverTimestamp() as unknown as Date,
+        updatedAt: serverTimestamp() as unknown as Date,
+      };
+      await setDoc(userRef, newUser);
+    } else {
+      await setDoc(userRef, {
+        displayName: displayName || docSnap.data()?.displayName,
+        email: firebaseUser.email || docSnap.data()?.email, 
+        photoURL: photoURL || docSnap.data()?.photoURL,
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+    }
+    // If Firestore logic is re-enabled, update toast logic below to use 'isNewUser'
+    */
 
     try {
       localStorage.setItem('loginTimestamp', Date.now().toString());
@@ -68,11 +74,11 @@ export default function LoginPage() {
       console.warn('localStorage not available, 4-hour session expiry may not work as expected.');
     }
     
-    // Temporarily using a generic success message since new user check is disabled
-    toast({
-      title: "Sign In Successful",
-      description: `Welcome back, ${displayName || 'User'}! (Firestore save is temporarily disabled)`,
-    });
+    // Step 3: Show toast notification
+    const displayNameForToast = firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User';
+    // The 'isNewUser' variable (for differentiated toast messages) is part of the commented-out Firestore block.
+    // Currently using a generic success message as Firestore interaction is off.
+    // If Firestore saving is re-enabled, you might want to adjust this toast logic:
     // if (isNewUser) {
     //   toast({
     //     title: "Welcome!",
@@ -81,9 +87,15 @@ export default function LoginPage() {
     // } else {
     //   toast({
     //     title: "Sign In Successful",
-    //     description: `Welcome back, ${displayName || 'User'}!`,
+    //     description: `Welcome back, ${displayNameForToast}!`,
     //   });
     // }
+    toast({
+      title: "Sign In Successful",
+      description: `Welcome back, ${displayNameForToast}! (Firestore save is temporarily disabled)`,
+    });
+    
+    // Step 4: Redirect to homepage (dashboard/menu)
     router.push('/dashboard/menu');
   };
 
@@ -91,8 +103,10 @@ export default function LoginPage() {
     setIsLoading(true);
     const provider = new GoogleAuthProvider();
     try {
+      // Login completion is recognized when signInWithPopup resolves
       const result: FirebaseUserCredential = await signInWithPopup(auth, provider);
       if (result.user) {
+        // Process sign-in: save info (localStorage), log to console, show toast, then redirect
         await processUserSignIn(result.user);
       }
     } catch (error: any) {

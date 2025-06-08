@@ -23,19 +23,29 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export default function LoginPage() {
   const router = useRouter();
   const { toast } = useToast();
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true); // Start true to handle initial auth check
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
   useEffect(() => {
-    // Check for redirect result when the component mounts
+    console.log("LoginPage useEffect running to check redirect result.");
     const checkRedirectResult = async () => {
-      setIsLoading(true);
+      setIsLoading(true); // Indicate that we are processing auth state
       try {
+        console.log("Calling getRedirectResult(auth)...");
         const result = await getRedirectResult(auth);
+        console.log("getRedirectResult response:", result);
+
         if (result && result.user) {
+          console.log("Google redirect result HAS a user. Processing sign-in...");
           toast({ title: "Google Sign-In Successful!", description: "Processing your information..." });
           await processUserSignIn(result.user);
+        } else {
+          console.log("No active Google redirect result found or result.user is null.");
+          // If no redirect result, it might be a normal page load or user is already signed in via session
+          // The onAuthStateChanged in AppLayout will handle existing sessions.
+          // We can set isLoading to false if no redirect processing is needed.
+          setIsLoading(false); 
         }
       } catch (error: any) {
         console.error('Error during Google redirect result processing:', error);
@@ -52,16 +62,19 @@ export default function LoginPage() {
           description: errorMessage,
           variant: "destructive",
         });
-      } finally {
         setIsLoading(false);
       }
+      // setIsLoading(false) might be called too early if processUserSignIn redirects
+      // It's generally set to false when auth state is resolved or an error occurs.
+      // If processUserSignIn is successful, redirection will happen, so loading state on this page becomes less relevant.
     };
 
     checkRedirectResult();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Empty dependency array ensures this runs once on mount
 
   const processUserSignIn = async (firebaseUser: FirebaseUser) => {
-    console.log("Firebase User Object (All Info):", firebaseUser);
+    console.log("ProcessUserSignIn called. Firebase User Object (All Info):", firebaseUser);
     
     // Firestore save logic is temporarily disabled
     /*
@@ -99,6 +112,7 @@ export default function LoginPage() {
 
     try {
       localStorage.setItem('loginTimestamp', Date.now().toString());
+      console.log("Login timestamp saved to localStorage.");
     } catch (e) {
       console.warn('localStorage not available, 4-hour session expiry may not work as expected.');
     }
@@ -120,22 +134,33 @@ export default function LoginPage() {
       title: "Sign In Successful",
       description: `Welcome back, ${displayNameForToast}! (Firestore save is temporarily disabled)`,
     });
-    
+    console.log("Pushing to /dashboard/menu...");
     router.push('/dashboard/menu');
+    // After router.push, it's good practice to ensure loading state is false if the component might not unmount immediately
+    setIsLoading(false); 
   };
 
   const handleGoogleSignIn = async () => {
     setIsLoading(true);
     const provider = new GoogleAuthProvider();
     try {
+      console.log("Initiating Google sign-in with redirect...");
       await signInWithRedirect(auth, provider);
       // The page will redirect to Google. After Google redirects back,
       // the useEffect hook will handle getRedirectResult.
+      // setIsLoading(false) here might be premature as the redirect is happening.
+      // The loading state should persist until the redirect flow completes or fails.
     } catch (error: any) {
       console.error('Error initiating Google sign-in redirect:', error);
+      let toastMessage = "Could not start the Google sign-in process. Please try again.";
+      if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
+        toastMessage = "Google Sign-In was cancelled or the window was closed. Please try again if you wish to sign in.";
+      } else if (error.message) {
+        toastMessage = error.message;
+      }
       toast({
         title: "Google Sign-In Error",
-        description: "Could not start the Google sign-in process. Please try again.",
+        description: toastMessage,
         variant: "destructive",
       });
       setIsLoading(false); // Reset loading if redirect initiation fails
@@ -182,7 +207,13 @@ export default function LoginPage() {
         variant: "destructive",
       });
     } finally {
-      setIsLoading(false);
+      // setIsLoading(false) here is tricky if processUserSignIn redirects.
+      // If it doesn't redirect (e.g., error before redirect), then it's fine.
+      // If it does redirect, the component unmounts.
+      // Let processUserSignIn handle its own isLoading for success cases.
+      if (!router.asPath.includes('/dashboard')) { // A way to check if redirection has likely started
+         setIsLoading(false);
+      }
     }
   };
 

@@ -9,9 +9,9 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { APP_NAME } from '@/lib/constants';
 import type { Tenant, Branch } from '@/lib/types';
-import { Building, Store, ArrowRight, Terminal } from 'lucide-react';
+import { Building, Store, ArrowRight, Terminal, Loader2 } from 'lucide-react';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where, orderBy, Timestamp } from 'firebase/firestore';
+import { collection, query, where, Timestamp, onSnapshot, Unsubscribe } from 'firebase/firestore';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 export default function TenantBranchSelectionPage() {
@@ -26,72 +26,87 @@ export default function TenantBranchSelectionPage() {
   const [fetchError, setFetchError] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchTenants = async () => {
-      setIsLoadingTenants(true);
-      setFetchError(null);
-      try {
-        const tenantsCollectionRef = collection(db, 'Tenants');
-        const q = query(tenantsCollectionRef, orderBy('name'));
-        const querySnapshot = await getDocs(q);
-        const fetchedTenants = querySnapshot.docs.map(doc => {
-          const data = doc.data();
-          return {
-            id: doc.id,
-            name: data.name,
-            subscriptionPlan: data.subscriptionPlan,
-            createdAt: (data.createdAt as Timestamp)?.toDate() || new Date(),
-            updatedAt: (data.updatedAt as Timestamp)?.toDate() || new Date(),
-          } as Tenant;
-        });
-        setTenantsData(fetchedTenants);
-      } catch (err) {
-        console.error("Error fetching tenants:", err);
-        setFetchError("Failed to load tenants. Please check your connection or contact support.");
-      } finally {
-        setIsLoadingTenants(false);
-      }
+    setIsLoadingTenants(true);
+    setFetchError(null);
+    console.log("Setting up Firestore listener for Tenants...");
+
+    const tenantsCollectionRef = collection(db, 'Tenants');
+    // Removed orderBy('name') for diagnostics
+    const q = query(tenantsCollectionRef);
+
+    const unsubscribeTenants: Unsubscribe = onSnapshot(q, (querySnapshot) => {
+      console.log("Tenants snapshot received. Processing...");
+      const fetchedTenants: Tenant[] = [];
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        fetchedTenants.push({
+          id: doc.id,
+          name: data.name,
+          subscriptionPlan: data.subscriptionPlan,
+          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : new Date()),
+          updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt) : new Date()),
+        } as Tenant);
+      });
+      console.log("Fetched Tenants:", fetchedTenants);
+      setTenantsData(fetchedTenants);
+      setIsLoadingTenants(false);
+    }, (err) => {
+      console.error("Error fetching tenants snapshot:", err);
+      setFetchError(`Failed to load tenants: ${err.message}. Check browser console and Firestore rules.`);
+      setIsLoadingTenants(false);
+    });
+
+    return () => {
+      console.log("Cleaning up Firestore listener for Tenants.");
+      unsubscribeTenants();
     };
-    fetchTenants();
   }, []);
 
   useEffect(() => {
     if (!selectedTenantId) {
       setBranchesData([]);
       setSelectedBranchId(undefined);
-      return;
+      return () => {}; // No listener to unsubscribe
     }
 
-    const fetchBranches = async () => {
-      setIsLoadingBranches(true);
-      setFetchError(null);
-      try {
-        const branchesCollectionRef = collection(db, 'Branches');
-        const q = query(
-          branchesCollectionRef,
-          where('tenantId', '==', selectedTenantId),
-          orderBy('name')
-        );
-        const querySnapshot = await getDocs(q);
-        const fetchedBranches = querySnapshot.docs.map(doc => {
-          const data = doc.data();
-          return {
-            id: doc.id,
-            tenantId: data.tenantId,
-            name: data.name,
-            location: data.location,
-            createdAt: (data.createdAt as Timestamp)?.toDate() || new Date(),
-            updatedAt: (data.updatedAt as Timestamp)?.toDate() || new Date(),
-          } as Branch;
-        });
-        setBranchesData(fetchedBranches);
-      } catch (err) {
-        console.error("Error fetching branches:", err);
-        setFetchError("Failed to load branches for the selected tenant. Please try again.");
-      } finally {
-        setIsLoadingBranches(false);
-      }
+    setIsLoadingBranches(true);
+    setFetchError(null);
+    console.log(`Setting up Firestore listener for Branches of tenant: ${selectedTenantId}`);
+
+    const branchesCollectionRef = collection(db, 'Branches');
+    // Removed orderBy('name') for diagnostics
+    const q = query(
+      branchesCollectionRef,
+      where('tenantId', '==', selectedTenantId)
+    );
+
+    const unsubscribeBranches: Unsubscribe = onSnapshot(q, (querySnapshot) => {
+      console.log(`Branches snapshot for tenant ${selectedTenantId} received. Processing...`);
+      const fetchedBranches: Branch[] = [];
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        fetchedBranches.push({
+          id: doc.id,
+          tenantId: data.tenantId,
+          name: data.name,
+          location: data.location,
+          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : new Date()),
+          updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt) : new Date()),
+        } as Branch);
+      });
+      console.log("Fetched Branches:", fetchedBranches);
+      setBranchesData(fetchedBranches);
+      setIsLoadingBranches(false);
+    }, (err) => {
+      console.error(`Error fetching branches snapshot for tenant ${selectedTenantId}:`, err);
+      setFetchError(`Failed to load branches: ${err.message}. Check browser console and Firestore rules.`);
+      setIsLoadingBranches(false);
+    });
+
+    return () => {
+      console.log(`Cleaning up Firestore listener for Branches of tenant: ${selectedTenantId}.`);
+      unsubscribeBranches();
     };
-    fetchBranches();
   }, [selectedTenantId]);
 
   const handleTenantChange = (tenantId: string) => {
@@ -136,14 +151,18 @@ export default function TenantBranchSelectionPage() {
             <Select 
               value={selectedTenantId} 
               onValueChange={handleTenantChange}
-              disabled={isLoadingTenants || tenantsData.length === 0}
+              disabled={isLoadingTenants || (tenantsData.length === 0 && !fetchError)}
             >
               <SelectTrigger id="tenant-select" className="w-full">
-                <SelectValue placeholder={isLoadingTenants ? "Loading tenants..." : "Choose a tenant..."} />
+                {isLoadingTenants && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                <SelectValue placeholder={isLoadingTenants ? "Loading tenants..." : (tenantsData.length === 0 ? "No tenants found" : "Choose a tenant...")} />
               </SelectTrigger>
               <SelectContent>
                 {isLoadingTenants && tenantsData.length === 0 ? (
-                  <SelectItem value="loading" disabled>Loading tenants...</SelectItem>
+                  <div className="flex items-center justify-center p-2">
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    <span>Loading tenants...</span>
+                  </div>
                 ) : tenantsData.length === 0 && !isLoadingTenants ? (
                    <SelectItem value="no-tenants" disabled>No tenants found</SelectItem>
                 ) : (
@@ -166,14 +185,18 @@ export default function TenantBranchSelectionPage() {
               <Select 
                 value={selectedBranchId} 
                 onValueChange={setSelectedBranchId} 
-                disabled={!selectedTenantId || isLoadingBranches || branchesData.length === 0}
+                disabled={!selectedTenantId || isLoadingBranches || (branchesData.length === 0 && !fetchError && !isLoadingBranches)}
               >
                 <SelectTrigger id="branch-select" className="w-full">
-                  <SelectValue placeholder={isLoadingBranches ? "Loading branches..." : "Choose a branch..."} />
+                  {isLoadingBranches && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  <SelectValue placeholder={isLoadingBranches ? "Loading branches..." : (branchesData.length === 0 ? "No branches found" : "Choose a branch...")} />
                 </SelectTrigger>
                 <SelectContent>
                   {isLoadingBranches && branchesData.length === 0 ? (
-                    <SelectItem value="loading" disabled>Loading branches...</SelectItem>
+                     <div className="flex items-center justify-center p-2">
+                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                       <span>Loading branches...</span>
+                     </div>
                   ): branchesData.length === 0 && !isLoadingBranches && selectedTenantId ? (
                     <SelectItem value="no-branches" disabled>No branches found for this tenant</SelectItem>
                   ) : (

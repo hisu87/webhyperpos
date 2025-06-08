@@ -1,6 +1,6 @@
 
 import { initializeApp, getApps, FirebaseApp } from "firebase/app";
-import { getFirestore, Firestore } from "firebase/firestore";
+import { getFirestore, Firestore, serverTimestamp   } from "firebase/firestore";
 import { getAuth, Auth } from "firebase/auth";
 import { getAnalytics, Analytics } from "firebase/analytics";
 
@@ -35,6 +35,7 @@ if (!getApps().length) {
     }
   }
 }
+
 
 // Initialize Cloud Firestore and get a reference to the service
 const db: Firestore = getFirestore(app);

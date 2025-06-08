@@ -27,48 +27,9 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
-  useEffect(() => {
-    console.log("LoginPage useEffect running to check redirect result.");
-    const checkRedirectResult = async () => {
-      setIsLoading(true); // Indicate that we are processing auth state
-      try {
-        console.log("Calling getRedirectResult(auth)...");
-        const result = await getRedirectResult(auth);
-        console.log("getRedirectResult response:", result);
-
-        if (result && result.user) {
-          console.log("Google redirect result HAS a user. Processing sign-in...");
-          // Toast for Google Sign-In success is now handled within processUserSignIn
-          await processUserSignIn(result.user);
-        } else {
-          console.log("No active Google redirect result found or result.user is null.");
-          setIsLoading(false);
-        }
-      } catch (error: any) {
-        console.error('Error during Google redirect result processing:', error);
-        let errorMessage = "An unexpected error occurred during Google sign-in. Please try again.";
-        if (error.code === 'auth/account-exists-with-different-credential') {
-          errorMessage = "An account already exists with this email using a different sign-in method. Try signing in with that method.";
-        } else if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
-           errorMessage = "Sign-in process was cancelled or popup closed. Please try again if you wish to sign in.";
-        } else {
-          errorMessage = error.message || errorMessage;
-        }
-        toast({
-          title: "Google Sign-In Failed",
-          description: errorMessage,
-          variant: "destructive",
-        });
-        setIsLoading(false);
-      }
-    };
-
-    checkRedirectResult();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Empty dependency array ensures this runs once on mount
-
   const processUserSignIn = async (firebaseUser: FirebaseUser) => {
-    console.log("ProcessUserSignIn called. Firebase User Object (All Info):", firebaseUser);
+    console.log("ProcessUserSignIn called. Firebase User ID:", firebaseUser.uid);
+    console.log("Firebase User Object (All Info):", firebaseUser);
     
     // Firestore save logic is explicitly disabled as per user request
     /*
@@ -94,6 +55,10 @@ export default function LoginPage() {
         updatedAt: serverTimestamp() as unknown as Date,
       };
       // await setDoc(userRef, newUser); // Ensure this is commented out
+      // toast({
+      //   title: "Welcome!",
+      //   description: `Your account has been created, ${displayName}. (Firestore save is temporarily disabled)`,
+      // });
     } else {
       // await setDoc(userRef, { // Ensure this is commented out
       //   displayName: displayName || docSnap.data()?.displayName,
@@ -101,6 +66,10 @@ export default function LoginPage() {
       //   photoURL: photoURL || docSnap.data()?.photoURL,
       //   updatedAt: serverTimestamp(),
       // }, { merge: true });
+      // toast({
+      //   title: "Sign In Successful",
+      //   description: `Welcome back, ${displayName}! (Firestore save is temporarily disabled)`,
+      // });
     }
     */
 
@@ -117,9 +86,57 @@ export default function LoginPage() {
       description: `Welcome back, ${displayNameForToast}! (User data not saved to Firestore)`,
     });
     console.log("Pushing to /dashboard/menu...");
+    setIsLoading(false); // Set loading false before navigation
     router.push('/dashboard/menu');
-    setIsLoading(false); 
   };
+  
+  useEffect(() => {
+    console.log("LoginPage useEffect running to check auth state and redirect result.");
+    const checkAuthAndRedirect = async () => {
+      setIsLoading(true);
+      try {
+        // First, check if Firebase already has a current user.
+        // This can happen if onAuthStateChanged in AppLayout fired first.
+        if (auth.currentUser) {
+          console.log("Firebase auth.currentUser already exists. Processing user:", auth.currentUser.uid);
+          await processUserSignIn(auth.currentUser);
+          return; // Exit early if user already processed
+        }
+
+        console.log("auth.currentUser is null. Calling getRedirectResult(auth)...");
+        const result = await getRedirectResult(auth);
+        console.log("getRedirectResult response:", result);
+
+        if (result && result.user) {
+          console.log("Google redirect result HAS a user. Processing sign-in...");
+          await processUserSignIn(result.user);
+        } else {
+          console.log("No active Google redirect result found or auth.currentUser is null after checking. User is not signed in or redirect not completed.");
+          setIsLoading(false); // User is not signed in, and no redirect result
+        }
+      } catch (error: any) {
+        console.error('Error during auth state/redirect processing:', error);
+        let errorMessage = "An unexpected error occurred during Google sign-in. Please try again.";
+        if (error.code === 'auth/account-exists-with-different-credential') {
+          errorMessage = "An account already exists with this email using a different sign-in method. Try signing in with that method.";
+        } else if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
+           errorMessage = "Sign-in process was cancelled or popup closed. Please try again if you wish to sign in.";
+        } else {
+          errorMessage = error.message || errorMessage;
+        }
+        toast({
+          title: "Google Sign-In Failed",
+          description: errorMessage,
+          variant: "destructive",
+        });
+        setIsLoading(false);
+      }
+    };
+
+    checkAuthAndRedirect();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Empty dependency array ensures this runs once on mount
+
 
   const handleGoogleSignIn = async () => {
     setIsLoading(true);
@@ -127,6 +144,8 @@ export default function LoginPage() {
     try {
       console.log("Initiating Google sign-in with redirect...");
       await signInWithRedirect(auth, provider);
+      // After this call, the page will redirect. Code here might not execute if redirect is immediate.
+      // The result is handled by getRedirectResult in the useEffect hook.
     } catch (error: any) {
       console.error('Error initiating Google sign-in redirect:', error);
       let toastMessage = "Could not start the Google sign-in process. Please try again.";
@@ -158,7 +177,12 @@ export default function LoginPage() {
     try {
       const result: FirebaseUserCredential = await signInWithEmailAndPassword(auth, email, password);
       if (result.user) {
-        await processUserSignIn(result.user);
+        await processUserSignIn(result.user); // This will handle setIsLoading(false) and navigate
+      } else {
+         // This case should ideally not happen if signInWithEmailAndPassword resolves successfully
+         // but as a safeguard if result.user is unexpectedly null:
+        console.warn("signInWithEmailAndPassword resolved but result.user is null.");
+        setIsLoading(false); 
       }
     } catch (error: any) {
       console.error('Error during email/password sign-in:', error);
@@ -182,9 +206,8 @@ export default function LoginPage() {
         description: errorMessage,
         variant: "destructive",
       });
-      setIsLoading(false); // Ensure loading is false on error
+      setIsLoading(false);
     }
-    // No finally setIsLoading(false) here, as processUserSignIn handles it or redirects
   };
 
 
@@ -266,7 +289,7 @@ export default function LoginPage() {
             className="w-full"
             disabled={isLoading && !auth.currentUser} // Disable if any loading operation is in progress
           >
-            {isLoading && !auth.currentUser ? (
+            {isLoading && !auth.currentUser ? ( // Only show spinner if actively processing something AND no user
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
               <Chrome className="mr-2 h-4 w-4" />

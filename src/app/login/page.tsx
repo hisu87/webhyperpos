@@ -33,7 +33,6 @@ export default function LoginPage() {
     
     // Step 2: "Save info" - currently this means setting a login timestamp in localStorage.
     // Firestore save logic is temporarily disabled as per previous request.
-    // To re-enable Firestore saving, uncomment the following block and ensure 'isNewUser' logic for toast is also updated:
     /*
     const userRef = doc(db, 'users', firebaseUser.uid);
     const docSnap = await getDoc(userRef);
@@ -65,7 +64,6 @@ export default function LoginPage() {
         updatedAt: serverTimestamp(),
       }, { merge: true });
     }
-    // If Firestore logic is re-enabled, update toast logic below to use 'isNewUser'
     */
 
     try {
@@ -76,9 +74,7 @@ export default function LoginPage() {
     
     // Step 3: Show toast notification
     const displayNameForToast = firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User';
-    // The 'isNewUser' variable (for differentiated toast messages) is part of the commented-out Firestore block.
-    // Currently using a generic success message as Firestore interaction is off.
-    // If Firestore saving is re-enabled, you might want to adjust this toast logic:
+    // The 'isNewUser' variable is part of the commented-out Firestore block.
     // if (isNewUser) {
     //   toast({
     //     title: "Welcome!",
@@ -90,7 +86,7 @@ export default function LoginPage() {
     //     description: `Welcome back, ${displayNameForToast}!`,
     //   });
     // }
-    toast({
+     toast({
       title: "Sign In Successful",
       description: `Welcome back, ${displayNameForToast}! (Firestore save is temporarily disabled)`,
     });
@@ -103,17 +99,21 @@ export default function LoginPage() {
     setIsLoading(true);
     const provider = new GoogleAuthProvider();
     try {
-      // Login completion is recognized when signInWithPopup resolves
       const result: FirebaseUserCredential = await signInWithPopup(auth, provider);
       if (result.user) {
-        // Process sign-in: save info (localStorage), log to console, show toast, then redirect
         await processUserSignIn(result.user);
       }
     } catch (error: any) {
       console.error('Error during Google sign-in:', error);
+      let errorMessage = "An unexpected error occurred. Please try again.";
+      if (error.code === 'auth/popup-closed-by-user') {
+        errorMessage = "Sign-in popup was closed. Please try again if you wish to sign in.";
+      } else {
+        errorMessage = error.message || errorMessage;
+      }
       toast({
-        title: "Sign In Failed",
-        description: error.message || "An unexpected error occurred. Please try again.",
+        title: "Sign In Cancelled or Failed",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {

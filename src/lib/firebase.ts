@@ -38,7 +38,9 @@ if (!getApps().length) {
 
 
 // Initialize Cloud Firestore and get a reference to the service
-const db: Firestore = getFirestore(app);
+// Explicitly using "hyper" as the database ID.
+const db: Firestore = getFirestore(app, "hyper");
 const auth: Auth = getAuth(app);
 
 export { app, db, auth, analytics };
+

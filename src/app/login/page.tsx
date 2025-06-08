@@ -81,41 +81,49 @@ export default function LoginPage() {
     }
     
     const displayNameForToast = firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User';
-    toast({
-      title: "Sign In Successful",
-      description: `Welcome back, ${displayNameForToast}! (User data not saved to Firestore)`,
-    });
-    console.log("Pushing to /dashboard/menu...");
+    console.log(`User display name for toast: ${displayNameForToast}`);
+
+    // Temporarily comment out toast to isolate redirection issue
+    // toast({
+    //   title: "Sign In Successful",
+    //   description: `Welcome back, ${displayNameForToast}! (User data not saved to Firestore)`,
+    // });
+    console.log("Toast temporarily disabled for debugging redirection.");
+
+    console.log("Attempting to redirect to /dashboard/menu...");
     setIsLoading(false); // Set loading false before navigation
     router.push('/dashboard/menu');
+    console.log("router.push('/dashboard/menu') called.");
   };
   
   useEffect(() => {
     console.log("LoginPage useEffect running to check auth state and redirect result.");
     const checkAuthAndRedirect = async () => {
       setIsLoading(true);
+      console.log("LoginPage useEffect: setIsLoading(true)");
       try {
         // First, check if Firebase already has a current user.
         // This can happen if onAuthStateChanged in AppLayout fired first.
         if (auth.currentUser) {
-          console.log("Firebase auth.currentUser already exists. Processing user:", auth.currentUser.uid);
+          console.log("LoginPage useEffect: Firebase auth.currentUser already exists. Processing user:", auth.currentUser.uid);
           await processUserSignIn(auth.currentUser);
           return; // Exit early if user already processed
         }
 
-        console.log("auth.currentUser is null. Calling getRedirectResult(auth)...");
+        console.log("LoginPage useEffect: auth.currentUser is null. Calling getRedirectResult(auth)...");
         const result = await getRedirectResult(auth);
-        console.log("getRedirectResult response:", result);
+        console.log("LoginPage useEffect: getRedirectResult response:", result);
 
         if (result && result.user) {
-          console.log("Google redirect result HAS a user. Processing sign-in...");
+          console.log("LoginPage useEffect: Google redirect result HAS a user. Processing sign-in for user:", result.user.uid);
           await processUserSignIn(result.user);
         } else {
-          console.log("No active Google redirect result found or auth.currentUser is null after checking. User is not signed in or redirect not completed.");
-          setIsLoading(false); // User is not signed in, and no redirect result
+          console.log("LoginPage useEffect: No active Google redirect result found or auth.currentUser is null after checking. User is not signed in or redirect not completed.");
+          setIsLoading(false); 
+          console.log("LoginPage useEffect: setIsLoading(false) because no user from redirect/current.");
         }
       } catch (error: any) {
-        console.error('Error during auth state/redirect processing:', error);
+        console.error('LoginPage useEffect: Error during auth state/redirect processing:', error);
         let errorMessage = "An unexpected error occurred during Google sign-in. Please try again.";
         if (error.code === 'auth/account-exists-with-different-credential') {
           errorMessage = "An account already exists with this email using a different sign-in method. Try signing in with that method.";
@@ -130,6 +138,7 @@ export default function LoginPage() {
           variant: "destructive",
         });
         setIsLoading(false);
+        console.log("LoginPage useEffect: setIsLoading(false) due to error in checkAuthAndRedirect.");
       }
     };
 
@@ -146,6 +155,7 @@ export default function LoginPage() {
       await signInWithRedirect(auth, provider);
       // After this call, the page will redirect. Code here might not execute if redirect is immediate.
       // The result is handled by getRedirectResult in the useEffect hook.
+      console.log("signInWithRedirect called. Waiting for redirect...");
     } catch (error: any) {
       console.error('Error initiating Google sign-in redirect:', error);
       let toastMessage = "Could not start the Google sign-in process. Please try again.";
@@ -315,3 +325,5 @@ export default function LoginPage() {
     </div>
   );
 }
+
+    

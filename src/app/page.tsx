@@ -11,74 +11,31 @@ import { APP_NAME } from '@/lib/constants';
 import type { Tenant, Branch } from '@/lib/types';
 import { Building, Store, ArrowRight, Terminal, Loader2 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { db } from '@/lib/firebase'; // Import Firestore instance
+import { collection, query, where, onSnapshot, DocumentData, QueryDocumentSnapshot } from 'firebase/firestore';
 
-const FIREBASE_PROJECT_ID = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
-const FIREBASE_API_KEY = process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
-const FIRESTORE_BASE_URL = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents`;
-
-// Helper to extract specific field types from Firestore REST API document fields
-const getStringField = (docFields: any, fieldName: string): string | undefined => docFields[fieldName]?.stringValue;
-const getTimestampField = (docFields: any, fieldName: string): Date | undefined => {
-  const tsValue = docFields[fieldName]?.timestampValue;
-  return tsValue ? new Date(tsValue) : undefined;
-};
-
-// Transformation for Tenant document from REST API
-function transformApiDocToTenant(apiDoc: any): Tenant | null {
-  const id = apiDoc.name?.split('/').pop();
-  if (!id || !apiDoc.fields) return null;
-
-  const name = getStringField(apiDoc.fields, 'name');
-  if (!name) {
-    console.warn(`Tenant document ${id} is missing mandatory 'name' field.`);
-    return null;
-  }
-
-  const createdAt = getTimestampField(apiDoc.fields, 'createdAt');
-  const updatedAt = getTimestampField(apiDoc.fields, 'updatedAt');
-
-  if (!createdAt || !updatedAt) {
-    console.warn(`Tenant document ${id} is missing createdAt or updatedAt timestampValue.`);
-    return null; // createdAt and updatedAt are mandatory in Tenant type
-  }
-
+// Helper to transform Firestore snapshot doc to Tenant
+function transformDocToTenant(doc: QueryDocumentSnapshot<DocumentData>): Tenant {
+  const data = doc.data();
   return {
-    id,
-    name,
-    subscriptionPlan: getStringField(apiDoc.fields, 'subscriptionPlan'),
-    createdAt,
-    updatedAt,
+    id: doc.id,
+    name: data.name || 'Unnamed Tenant',
+    subscriptionPlan: data.subscriptionPlan,
+    createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
+    updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate() : new Date(),
   };
 }
 
-// Transformation for Branch document from REST API
-function transformApiDocToBranch(apiDoc: any): Branch | null {
-  const id = apiDoc.name?.split('/').pop();
-  if (!id || !apiDoc.fields) return null;
-
-  const tenantId = getStringField(apiDoc.fields, 'tenantId');
-  const name = getStringField(apiDoc.fields, 'name');
-
-  if (!tenantId || !name) {
-    console.warn(`Branch document ${id} is missing mandatory 'tenantId' or 'name' field.`);
-    return null;
-  }
-  
-  const createdAt = getTimestampField(apiDoc.fields, 'createdAt');
-  const updatedAt = getTimestampField(apiDoc.fields, 'updatedAt');
-
-  if (!createdAt || !updatedAt) {
-    console.warn(`Branch document ${id} is missing createdAt or updatedAt timestampValue.`);
-    return null; // createdAt and updatedAt are mandatory in Branch type
-  }
-
+// Helper to transform Firestore snapshot doc to Branch
+function transformDocToBranch(doc: QueryDocumentSnapshot<DocumentData>): Branch {
+  const data = doc.data();
   return {
-    id,
-    tenantId,
-    name,
-    location: getStringField(apiDoc.fields, 'location'),
-    createdAt,
-    updatedAt,
+    id: doc.id,
+    tenantId: data.tenantId || '',
+    name: data.name || 'Unnamed Branch',
+    location: data.location,
+    createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
+    updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate() : new Date(),
   };
 }
 
@@ -95,111 +52,79 @@ export default function TenantBranchSelectionPage() {
   const [fetchError, setFetchError] = useState<string | null>(null);
 
   useEffect(() => {
-    async function fetchTenants() {
-      setIsLoadingTenants(true);
-      setFetchError(null);
-      console.log("Fetching Tenants via REST API...");
+    setIsLoadingTenants(true);
+    setFetchError(null);
+    console.log("Setting up Firestore listener for Tenants...");
 
-      if (!FIREBASE_API_KEY) {
-        console.error("Firebase API Key is not configured.");
-        setFetchError("Client-side configuration error for fetching tenants.");
-        setIsLoadingTenants(false);
-        return;
+    const tenantsQuery = query(collection(db, "Tenants")/*, orderBy("name")*/); // orderBy removed for now
+
+    const unsubscribeTenants = onSnapshot(tenantsQuery, (querySnapshot) => {
+      console.log("Tenants snapshot received. Processing...");
+      const fetchedTenants: Tenant[] = [];
+      querySnapshot.forEach((doc) => {
+        // console.log("Tenant doc data:", doc.id, "=>", doc.data());
+        fetchedTenants.push(transformDocToTenant(doc));
+      });
+      // Sort client-side if orderBy is removed from query
+      fetchedTenants.sort((a, b) => a.name.localeCompare(b.name));
+      setTenantsData(fetchedTenants);
+      setIsLoadingTenants(false);
+      console.log("Tenants data updated:", fetchedTenants);
+      if (fetchedTenants.length === 0) {
+        console.warn("No tenants found in 'Tenants' collection.");
       }
-      
-      try {
-        const response = await fetch(`${FIRESTORE_BASE_URL}/Tenants?key=${FIREBASE_API_KEY}`);
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          console.error("Error response from Firestore REST API (Tenants):", response.status, errorData);
-          throw new Error(`Failed to fetch tenants: ${response.status} ${response.statusText}. ${errorData.error?.message || ''}`);
-        }
-        const data = await response.json();
-        console.log("Raw Tenants data from REST API:", data);
+    }, (error) => {
+      console.error("Error fetching tenants with onSnapshot:", error);
+      setFetchError(`Failed to load tenants: ${error.message}. Check Firestore rules and collection name.`);
+      setIsLoadingTenants(false);
+    });
 
-        const fetchedTenants: Tenant[] = (data.documents || [])
-          .map(transformApiDocToTenant)
-          .filter((tenant: Tenant | null): tenant is Tenant => tenant !== null)
-          .sort((a: Tenant, b: Tenant) => a.name.localeCompare(b.name)); // Optional: client-side sort
-
-        console.log("Transformed Tenants:", fetchedTenants);
-        setTenantsData(fetchedTenants);
-      } catch (err: any) {
-        console.error("Error fetching tenants via REST API:", err);
-        setFetchError(`Failed to load tenants: ${err.message}. Check console and Firestore rules (must allow public read with API key).`);
-      } finally {
-        setIsLoadingTenants(false);
-      }
-    }
-    fetchTenants();
+    // Cleanup listener on component unmount
+    return () => {
+      console.log("Cleaning up Tenants listener.");
+      unsubscribeTenants();
+    };
   }, []);
 
   useEffect(() => {
     if (!selectedTenantId) {
       setBranchesData([]);
-      setSelectedBranchId(undefined);
+      setSelectedBranchId(undefined); // Reset branch selection when tenant changes
       return;
     }
 
-    async function fetchBranches() {
-      setIsLoadingBranches(true);
-      setFetchError(null);
-      console.log(`Fetching Branches for tenant ${selectedTenantId} via REST API...`);
+    setIsLoadingBranches(true);
+    setFetchError(null); // Clear previous errors
+    console.log(`Setting up Firestore listener for Branches of tenant: ${selectedTenantId}`);
 
-      if (!FIREBASE_API_KEY) {
-        console.error("Firebase API Key is not configured.");
-        setFetchError("Client-side configuration error for fetching branches.");
-        setIsLoadingBranches(false);
-        return;
+    const branchesQuery = query(collection(db, "Branches"), where("tenantId", "==", selectedTenantId)/*, orderBy("name")*/); // orderBy removed
+
+    const unsubscribeBranches = onSnapshot(branchesQuery, (querySnapshot) => {
+      console.log(`Branches snapshot received for tenant ${selectedTenantId}. Processing...`);
+      const fetchedBranches: Branch[] = [];
+      querySnapshot.forEach((doc) => {
+        // console.log("Branch doc data:", doc.id, "=>", doc.data());
+        fetchedBranches.push(transformDocToBranch(doc));
+      });
+       // Sort client-side if orderBy is removed from query
+      fetchedBranches.sort((a, b) => a.name.localeCompare(b.name));
+      setBranchesData(fetchedBranches);
+      setIsLoadingBranches(false);
+      console.log("Branches data updated:", fetchedBranches);
+       if (fetchedBranches.length === 0) {
+        console.warn(`No branches found for tenantId '${selectedTenantId}' in 'Branches' collection.`);
       }
+    }, (error) => {
+      console.error(`Error fetching branches for tenant ${selectedTenantId} with onSnapshot:`, error);
+      setFetchError(`Failed to load branches for tenant ${selectedTenantId}: ${error.message}. Check Firestore rules, collection name, and tenantId field.`);
+      setIsLoadingBranches(false);
+    });
 
-      try {
-        const queryBody = {
-          structuredQuery: {
-            from: [{ collectionId: "Branches" }],
-            where: {
-              fieldFilter: {
-                field: { fieldPath: "tenantId" },
-                op: "EQUAL",
-                value: { stringValue: selectedTenantId }
-              }
-            },
-            // orderBy: [{ field: { fieldPath: "name" }, direction: "ASCENDING" }] // Optional
-          }
-        };
-
-        const response = await fetch(`${FIRESTORE_BASE_URL}:runQuery?key=${FIREBASE_API_KEY}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(queryBody),
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          console.error("Error response from Firestore REST API (Branches):", response.status, errorData);
-          throw new Error(`Failed to fetch branches: ${response.status} ${response.statusText}. ${errorData.error?.message || ''}`);
-        }
-        
-        const results = await response.json();
-        console.log(`Raw Branches data for tenant ${selectedTenantId} from REST API:`, results);
-
-        const fetchedBranches: Branch[] = results
-          .map((item: any) => item.document ? transformApiDocToBranch(item.document) : null)
-          .filter((branch: Branch | null): branch is Branch => branch !== null)
-          .sort((a: Branch, b: Branch) => a.name.localeCompare(b.name)); // Optional: client-side sort
-
-        console.log("Transformed Branches:", fetchedBranches);
-        setBranchesData(fetchedBranches);
-      } catch (err: any) {
-        console.error(`Error fetching branches for tenant ${selectedTenantId} via REST API:`, err);
-        setFetchError(`Failed to load branches: ${err.message}. Check console and Firestore rules (must allow public read with API key).`);
-      } finally {
-        setIsLoadingBranches(false);
-      }
-    }
-    fetchBranches();
+    // Cleanup listener
+    return () => {
+      console.log(`Cleaning up Branches listener for tenant: ${selectedTenantId}`);
+      unsubscribeBranches();
+    };
   }, [selectedTenantId]);
 
   const handleTenantChange = (tenantId: string) => {

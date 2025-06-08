@@ -28,6 +28,8 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
 
   const processUserSignIn = async (firebaseUser: FirebaseUser) => {
+    console.log("Firebase User Object (All Info):", firebaseUser);
+    
     // Firestore save is temporarily disabled
     // const userRef = doc(db, 'users', firebaseUser.uid);
     // const docSnap = await getDoc(userRef);
@@ -121,7 +123,8 @@ export default function LoginPage() {
       if (result.user) {
         await processUserSignIn(result.user);
       }
-    } catch (error: any) {
+    } catch (error: any)
+       {
       console.error('Error during email/password sign-in:', error);
       let errorMessage = "An unexpected error occurred. Please try again.";
       if (error.code) {

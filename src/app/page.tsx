@@ -10,9 +10,78 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { APP_NAME } from '@/lib/constants';
 import type { Tenant, Branch } from '@/lib/types';
 import { Building, Store, ArrowRight, Terminal, Loader2 } from 'lucide-react';
-import { db } from '@/lib/firebase';
-import { collection, query, where, Timestamp, onSnapshot, Unsubscribe } from 'firebase/firestore';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+
+const FIREBASE_PROJECT_ID = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
+const FIREBASE_API_KEY = process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
+const FIRESTORE_BASE_URL = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents`;
+
+// Helper to extract specific field types from Firestore REST API document fields
+const getStringField = (docFields: any, fieldName: string): string | undefined => docFields[fieldName]?.stringValue;
+const getTimestampField = (docFields: any, fieldName: string): Date | undefined => {
+  const tsValue = docFields[fieldName]?.timestampValue;
+  return tsValue ? new Date(tsValue) : undefined;
+};
+
+// Transformation for Tenant document from REST API
+function transformApiDocToTenant(apiDoc: any): Tenant | null {
+  const id = apiDoc.name?.split('/').pop();
+  if (!id || !apiDoc.fields) return null;
+
+  const name = getStringField(apiDoc.fields, 'name');
+  if (!name) {
+    console.warn(`Tenant document ${id} is missing mandatory 'name' field.`);
+    return null;
+  }
+
+  const createdAt = getTimestampField(apiDoc.fields, 'createdAt');
+  const updatedAt = getTimestampField(apiDoc.fields, 'updatedAt');
+
+  if (!createdAt || !updatedAt) {
+    console.warn(`Tenant document ${id} is missing createdAt or updatedAt timestampValue.`);
+    return null; // createdAt and updatedAt are mandatory in Tenant type
+  }
+
+  return {
+    id,
+    name,
+    subscriptionPlan: getStringField(apiDoc.fields, 'subscriptionPlan'),
+    createdAt,
+    updatedAt,
+  };
+}
+
+// Transformation for Branch document from REST API
+function transformApiDocToBranch(apiDoc: any): Branch | null {
+  const id = apiDoc.name?.split('/').pop();
+  if (!id || !apiDoc.fields) return null;
+
+  const tenantId = getStringField(apiDoc.fields, 'tenantId');
+  const name = getStringField(apiDoc.fields, 'name');
+
+  if (!tenantId || !name) {
+    console.warn(`Branch document ${id} is missing mandatory 'tenantId' or 'name' field.`);
+    return null;
+  }
+  
+  const createdAt = getTimestampField(apiDoc.fields, 'createdAt');
+  const updatedAt = getTimestampField(apiDoc.fields, 'updatedAt');
+
+  if (!createdAt || !updatedAt) {
+    console.warn(`Branch document ${id} is missing createdAt or updatedAt timestampValue.`);
+    return null; // createdAt and updatedAt are mandatory in Branch type
+  }
+
+  return {
+    id,
+    tenantId,
+    name,
+    location: getStringField(apiDoc.fields, 'location'),
+    createdAt,
+    updatedAt,
+  };
+}
+
 
 export default function TenantBranchSelectionPage() {
   const [selectedTenantId, setSelectedTenantId] = useState<string | undefined>();
@@ -26,87 +95,111 @@ export default function TenantBranchSelectionPage() {
   const [fetchError, setFetchError] = useState<string | null>(null);
 
   useEffect(() => {
-    setIsLoadingTenants(true);
-    setFetchError(null);
-    console.log("Setting up Firestore listener for Tenants...");
+    async function fetchTenants() {
+      setIsLoadingTenants(true);
+      setFetchError(null);
+      console.log("Fetching Tenants via REST API...");
 
-    const tenantsCollectionRef = collection(db, 'Tenants');
-    // Removed orderBy('name') for diagnostics
-    const q = query(tenantsCollectionRef);
+      if (!FIREBASE_API_KEY) {
+        console.error("Firebase API Key is not configured.");
+        setFetchError("Client-side configuration error for fetching tenants.");
+        setIsLoadingTenants(false);
+        return;
+      }
+      
+      try {
+        const response = await fetch(`${FIRESTORE_BASE_URL}/Tenants?key=${FIREBASE_API_KEY}`);
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          console.error("Error response from Firestore REST API (Tenants):", response.status, errorData);
+          throw new Error(`Failed to fetch tenants: ${response.status} ${response.statusText}. ${errorData.error?.message || ''}`);
+        }
+        const data = await response.json();
+        console.log("Raw Tenants data from REST API:", data);
 
-    const unsubscribeTenants: Unsubscribe = onSnapshot(q, (querySnapshot) => {
-      console.log("Tenants snapshot received. Processing...");
-      const fetchedTenants: Tenant[] = [];
-      querySnapshot.forEach((doc) => {
-        const data = doc.data();
-        fetchedTenants.push({
-          id: doc.id,
-          name: data.name,
-          subscriptionPlan: data.subscriptionPlan,
-          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : new Date()),
-          updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt) : new Date()),
-        } as Tenant);
-      });
-      console.log("Fetched Tenants:", fetchedTenants);
-      setTenantsData(fetchedTenants);
-      setIsLoadingTenants(false);
-    }, (err) => {
-      console.error("Error fetching tenants snapshot:", err);
-      setFetchError(`Failed to load tenants: ${err.message}. Check browser console and Firestore rules.`);
-      setIsLoadingTenants(false);
-    });
+        const fetchedTenants: Tenant[] = (data.documents || [])
+          .map(transformApiDocToTenant)
+          .filter((tenant: Tenant | null): tenant is Tenant => tenant !== null)
+          .sort((a: Tenant, b: Tenant) => a.name.localeCompare(b.name)); // Optional: client-side sort
 
-    return () => {
-      console.log("Cleaning up Firestore listener for Tenants.");
-      unsubscribeTenants();
-    };
+        console.log("Transformed Tenants:", fetchedTenants);
+        setTenantsData(fetchedTenants);
+      } catch (err: any) {
+        console.error("Error fetching tenants via REST API:", err);
+        setFetchError(`Failed to load tenants: ${err.message}. Check console and Firestore rules (must allow public read with API key).`);
+      } finally {
+        setIsLoadingTenants(false);
+      }
+    }
+    fetchTenants();
   }, []);
 
   useEffect(() => {
     if (!selectedTenantId) {
       setBranchesData([]);
       setSelectedBranchId(undefined);
-      return () => {}; // No listener to unsubscribe
+      return;
     }
 
-    setIsLoadingBranches(true);
-    setFetchError(null);
-    console.log(`Setting up Firestore listener for Branches of tenant: ${selectedTenantId}`);
+    async function fetchBranches() {
+      setIsLoadingBranches(true);
+      setFetchError(null);
+      console.log(`Fetching Branches for tenant ${selectedTenantId} via REST API...`);
 
-    const branchesCollectionRef = collection(db, 'Branches');
-    // Removed orderBy('name') for diagnostics
-    const q = query(
-      branchesCollectionRef,
-      where('tenantId', '==', selectedTenantId)
-    );
+      if (!FIREBASE_API_KEY) {
+        console.error("Firebase API Key is not configured.");
+        setFetchError("Client-side configuration error for fetching branches.");
+        setIsLoadingBranches(false);
+        return;
+      }
 
-    const unsubscribeBranches: Unsubscribe = onSnapshot(q, (querySnapshot) => {
-      console.log(`Branches snapshot for tenant ${selectedTenantId} received. Processing...`);
-      const fetchedBranches: Branch[] = [];
-      querySnapshot.forEach((doc) => {
-        const data = doc.data();
-        fetchedBranches.push({
-          id: doc.id,
-          tenantId: data.tenantId,
-          name: data.name,
-          location: data.location,
-          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : new Date()),
-          updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt) : new Date()),
-        } as Branch);
-      });
-      console.log("Fetched Branches:", fetchedBranches);
-      setBranchesData(fetchedBranches);
-      setIsLoadingBranches(false);
-    }, (err) => {
-      console.error(`Error fetching branches snapshot for tenant ${selectedTenantId}:`, err);
-      setFetchError(`Failed to load branches: ${err.message}. Check browser console and Firestore rules.`);
-      setIsLoadingBranches(false);
-    });
+      try {
+        const queryBody = {
+          structuredQuery: {
+            from: [{ collectionId: "Branches" }],
+            where: {
+              fieldFilter: {
+                field: { fieldPath: "tenantId" },
+                op: "EQUAL",
+                value: { stringValue: selectedTenantId }
+              }
+            },
+            // orderBy: [{ field: { fieldPath: "name" }, direction: "ASCENDING" }] // Optional
+          }
+        };
 
-    return () => {
-      console.log(`Cleaning up Firestore listener for Branches of tenant: ${selectedTenantId}.`);
-      unsubscribeBranches();
-    };
+        const response = await fetch(`${FIRESTORE_BASE_URL}:runQuery?key=${FIREBASE_API_KEY}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(queryBody),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          console.error("Error response from Firestore REST API (Branches):", response.status, errorData);
+          throw new Error(`Failed to fetch branches: ${response.status} ${response.statusText}. ${errorData.error?.message || ''}`);
+        }
+        
+        const results = await response.json();
+        console.log(`Raw Branches data for tenant ${selectedTenantId} from REST API:`, results);
+
+        const fetchedBranches: Branch[] = results
+          .map((item: any) => item.document ? transformApiDocToBranch(item.document) : null)
+          .filter((branch: Branch | null): branch is Branch => branch !== null)
+          .sort((a: Branch, b: Branch) => a.name.localeCompare(b.name)); // Optional: client-side sort
+
+        console.log("Transformed Branches:", fetchedBranches);
+        setBranchesData(fetchedBranches);
+      } catch (err: any) {
+        console.error(`Error fetching branches for tenant ${selectedTenantId} via REST API:`, err);
+        setFetchError(`Failed to load branches: ${err.message}. Check console and Firestore rules (must allow public read with API key).`);
+      } finally {
+        setIsLoadingBranches(false);
+      }
+    }
+    fetchBranches();
   }, [selectedTenantId]);
 
   const handleTenantChange = (tenantId: string) => {
@@ -155,7 +248,7 @@ export default function TenantBranchSelectionPage() {
             >
               <SelectTrigger id="tenant-select" className="w-full">
                 {isLoadingTenants && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                <SelectValue placeholder={isLoadingTenants ? "Loading tenants..." : (tenantsData.length === 0 ? "No tenants found" : "Choose a tenant...")} />
+                <SelectValue placeholder={isLoadingTenants ? "Loading tenants..." : (tenantsData.length === 0 && !fetchError ? "No tenants found" : "Choose a tenant...")} />
               </SelectTrigger>
               <SelectContent>
                 {isLoadingTenants && tenantsData.length === 0 ? (
@@ -163,7 +256,7 @@ export default function TenantBranchSelectionPage() {
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     <span>Loading tenants...</span>
                   </div>
-                ) : tenantsData.length === 0 && !isLoadingTenants ? (
+                ) : tenantsData.length === 0 && !isLoadingTenants && !fetchError ? (
                    <SelectItem value="no-tenants" disabled>No tenants found</SelectItem>
                 ) : (
                   tenantsData.map((tenant: Tenant) => (
@@ -189,7 +282,7 @@ export default function TenantBranchSelectionPage() {
               >
                 <SelectTrigger id="branch-select" className="w-full">
                   {isLoadingBranches && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  <SelectValue placeholder={isLoadingBranches ? "Loading branches..." : (branchesData.length === 0 ? "No branches found" : "Choose a branch...")} />
+                  <SelectValue placeholder={isLoadingBranches ? "Loading branches..." : (branchesData.length === 0 && !fetchError && !isLoadingBranches && selectedTenantId ? "No branches found" : "Choose a branch...")} />
                 </SelectTrigger>
                 <SelectContent>
                   {isLoadingBranches && branchesData.length === 0 ? (
@@ -197,8 +290,8 @@ export default function TenantBranchSelectionPage() {
                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                        <span>Loading branches...</span>
                      </div>
-                  ): branchesData.length === 0 && !isLoadingBranches && selectedTenantId ? (
-                    <SelectItem value="no-branches" disabled>No branches found for this tenant</SelectItem>
+                  ): branchesData.length === 0 && !isLoadingBranches && selectedTenantId && !fetchError ? (
+                    <SelectItem value="no-branches" disabled>No branches for this tenant</SelectItem>
                   ) : (
                     branchesData.map((branch: Branch) => (
                       <SelectItem key={branch.id} value={branch.id}>
@@ -231,3 +324,5 @@ export default function TenantBranchSelectionPage() {
     </div>
   );
 }
+
+    

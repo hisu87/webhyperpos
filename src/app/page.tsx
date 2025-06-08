@@ -8,12 +8,12 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { APP_NAME } from '@/lib/constants';
-import type { Tenant, Branch } from '@/lib/types';
-import { Building, Store, ArrowRight, Terminal, Loader2 } from 'lucide-react';
+import type { Tenant, Branch, User as AppUser } from '@/lib/types';
+import { Building, Store, ArrowRight, Terminal, Loader2, User as UserIcon } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged, type User as FirebaseUser } from 'firebase/auth';
-import { collection, query, where, onSnapshot, DocumentData, QueryDocumentSnapshot } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, DocumentData, QueryDocumentSnapshot, limit, getDocs } from 'firebase/firestore';
 
 // Helper to transform Firestore snapshot doc to Tenant
 function transformDocToTenant(doc: QueryDocumentSnapshot<DocumentData>): Tenant {
@@ -40,10 +40,19 @@ function transformDocToBranch(doc: QueryDocumentSnapshot<DocumentData>): Branch 
   };
 }
 
+// Helper to extract relevant user profile info from Firestore user doc
+interface UserProfileData {
+  tenantId?: string;
+  branchId?: string;
+}
+
 
 export default function TenantBranchSelectionPage() {
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
+
+  const [userProfileData, setUserProfileData] = useState<UserProfileData | null>(null);
+  const [isLoadingUserProfile, setIsLoadingUserProfile] = useState<boolean>(false);
 
   const [selectedTenantId, setSelectedTenantId] = useState<string | undefined>();
   const [selectedBranchId, setSelectedBranchId] = useState<string | undefined>();
@@ -59,11 +68,12 @@ export default function TenantBranchSelectionPage() {
     console.log("Tenant/Branch Page: Setting up Firebase Auth listener...");
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       if (user) {
-        console.log("Tenant/Branch Page: Auth state changed. User signed IN:", user.uid);
+        console.log("Tenant/Branch Page: Auth state changed. User signed IN:", user.uid, "Email:", user.email);
         setCurrentUser(user);
       } else {
         console.log("Tenant/Branch Page: Auth state changed. User signed OUT.");
         setCurrentUser(null);
+        setUserProfileData(null); // Clear user profile on logout
         setTenantsData([]);
         setBranchesData([]);
         setSelectedTenantId(undefined);
@@ -80,15 +90,56 @@ export default function TenantBranchSelectionPage() {
     };
   }, []);
 
+  // Effect to fetch user's profile (tenantId, branchId) from 'users' collection
+  useEffect(() => {
+    if (isAuthLoading) {
+      console.log("Tenant/Branch Page: Auth state still loading, waiting to fetch user profile.");
+      return;
+    }
+    if (!currentUser || !currentUser.email) {
+      console.log("Tenant/Branch Page: No authenticated user or email, skipping user profile fetch.");
+      setUserProfileData(null); // Clear profile if no user or email
+      return;
+    }
+
+    setIsLoadingUserProfile(true);
+    setFetchError(null); // Clear previous errors
+    console.log("Tenant/Branch Page: Fetching user profile for email:", currentUser.email);
+
+    const usersQuery = query(collection(db, "users"), where("email", "==", currentUser.email), limit(1));
+    
+    getDocs(usersQuery).then(querySnapshot => {
+      if (!querySnapshot.empty) {
+        const userDoc = querySnapshot.docs[0];
+        const userData = userDoc.data() as AppUser; // Assuming AppUser type has tenantId and branchId
+        console.log("Tenant/Branch Page: User profile found:", { tenantId: userData.tenantId, branchId: userData.branchId });
+        setUserProfileData({ tenantId: userData.tenantId, branchId: userData.branchId });
+      } else {
+        console.warn("Tenant/Branch Page: No user profile found in 'users' collection for email:", currentUser.email);
+        setUserProfileData(null); // No profile found or no tenant/branch assigned
+      }
+    }).catch(error => {
+      console.error("Tenant/Branch Page: Error fetching user profile:", error);
+      setFetchError(`Failed to load user profile: ${error.message}. Check 'users' collection and query permissions.`);
+      setUserProfileData(null);
+    }).finally(() => {
+      setIsLoadingUserProfile(false);
+      console.log("Tenant/Branch Page: User profile fetching complete.");
+    });
+
+  }, [currentUser, isAuthLoading]);
+
+
   const handleTenantChange = (tenantId: string | undefined) => {
     console.log("Tenant/Branch Page: handleTenantChange called with tenantId:", tenantId);
     setSelectedTenantId(tenantId);
     setSelectedBranchId(undefined); // Reset branch selection, this will trigger branch useEffect
   };
 
+  // Effect to load tenants
   useEffect(() => {
-    if (isAuthLoading) {
-      console.log("Tenant/Branch Page: Auth state still loading, waiting to fetch tenants.");
+    if (isAuthLoading || isLoadingUserProfile) {
+      console.log("Tenant/Branch Page: Auth or User Profile still loading, waiting to fetch tenants.");
       setIsLoadingTenants(true);
       return;
     }
@@ -96,7 +147,7 @@ export default function TenantBranchSelectionPage() {
     if (!currentUser) {
       console.log("Tenant/Branch Page: No authenticated user, skipping tenants fetch. Clearing tenant data.");
       setTenantsData([]);
-      setSelectedTenantId(undefined); // Clear selection
+      setSelectedTenantId(undefined);
       setSelectedBranchId(undefined);
       setIsLoadingTenants(false);
       if (!isAuthLoading) setFetchError("Please log in to view tenants.");
@@ -114,7 +165,7 @@ export default function TenantBranchSelectionPage() {
       querySnapshot.forEach((doc) => {
         fetchedTenants.push(transformDocToTenant(doc));
       });
-      fetchedTenants.sort((a, b) => a.name.localeCompare(b.name)); // Client-side sort
+      // fetchedTenants.sort((a, b) => a.name.localeCompare(b.name));
       
       setTenantsData(fetchedTenants);
       setIsLoadingTenants(false);
@@ -123,23 +174,28 @@ export default function TenantBranchSelectionPage() {
       if (fetchedTenants.length === 0) {
         console.warn("Tenant/Branch Page: No tenants found.");
         setFetchError("No tenants found for your account or permissions are missing.");
-        handleTenantChange(undefined); // Clear selection if no tenants
+        handleTenantChange(undefined);
       } else {
+        // Try to pre-select based on userProfileData, then single tenant, then existing selection
+        const userProfileTenantId = userProfileData?.tenantId;
         const currentSelectionIsValid = fetchedTenants.some(t => t.id === selectedTenantId);
-        if (fetchedTenants.length === 1 && (!selectedTenantId || !currentSelectionIsValid)) {
+
+        if (userProfileTenantId && fetchedTenants.some(t => t.id === userProfileTenantId)) {
+          console.log("Tenant/Branch Page: Pre-selecting tenant from user profile:", userProfileTenantId);
+          handleTenantChange(userProfileTenantId);
+        } else if (fetchedTenants.length === 1 && (!selectedTenantId || !currentSelectionIsValid)) {
           console.log("Tenant/Branch Page: Auto-selecting single tenant:", fetchedTenants[0].name);
           handleTenantChange(fetchedTenants[0].id);
         } else if (selectedTenantId && !currentSelectionIsValid) {
           console.log("Tenant/Branch Page: Previously selected tenant no longer valid. Clearing selection.");
           handleTenantChange(undefined);
         }
-        // If multiple tenants and a valid one is selected, or none selected, user interaction is needed.
       }
     }, (error) => {
       console.error("Tenant/Branch Page: Error fetching tenants:", error);
       setFetchError(`Failed to load tenants: ${error.message}. Check Firestore rules and collection name "Tenants".`);
       setIsLoadingTenants(false);
-      setTenantsData([]); // Clear data on error
+      setTenantsData([]);
       handleTenantChange(undefined);
     });
 
@@ -147,11 +203,12 @@ export default function TenantBranchSelectionPage() {
       console.log("Tenant/Branch Page: Cleaning up Tenants listener.");
       unsubscribeTenants();
     };
-  }, [currentUser, isAuthLoading]); // selectedTenantId removed as direct dependency here to avoid loops with auto-selection
+  }, [currentUser, isAuthLoading, userProfileData, isLoadingUserProfile]);
 
+  // Effect to load branches based on selectedTenantId
   useEffect(() => {
-    if (isAuthLoading) {
-      console.log("Tenant/Branch Page: Auth state still loading, waiting to fetch branches.");
+    if (isAuthLoading || isLoadingUserProfile) {
+      console.log("Tenant/Branch Page: Auth or User Profile still loading, waiting to fetch branches.");
       if (selectedTenantId) setIsLoadingBranches(true);
       return;
     }
@@ -172,7 +229,7 @@ export default function TenantBranchSelectionPage() {
       return;
     }
 
-    setFetchError(null); // Clear general error, branch specific error can be set below
+    setFetchError(null);
     setIsLoadingBranches(true);
     console.log(`Tenant/Branch Page: Setting up Firestore listener for Branches of tenant: ${selectedTenantId}`);
 
@@ -183,7 +240,7 @@ export default function TenantBranchSelectionPage() {
       querySnapshot.forEach((doc) => {
         fetchedBranches.push(transformDocToBranch(doc));
       });
-      fetchedBranches.sort((a, b) => a.name.localeCompare(b.name)); // Client-side sort
+      // fetchedBranches.sort((a, b) => a.name.localeCompare(b.name));
 
       setBranchesData(fetchedBranches);
       setIsLoadingBranches(false);
@@ -191,11 +248,14 @@ export default function TenantBranchSelectionPage() {
 
       if (fetchedBranches.length === 0) {
         console.warn(`Tenant/Branch Page: No branches found for tenantId '${selectedTenantId}'.`);
-        // Do not set general fetchError here, let placeholder indicate no branches
-        // setFetchError(`No branches found for the selected tenant.`);
       } else {
-         // Auto-select first branch if only one is available and none is selected
-        if (fetchedBranches.length === 1 && !selectedBranchId) {
+        const userProfileBranchId = userProfileData?.branchId;
+        const userProfileTenantId = userProfileData?.tenantId;
+
+        if (userProfileBranchId && userProfileTenantId === selectedTenantId && fetchedBranches.some(b => b.id === userProfileBranchId)) {
+          console.log("Tenant/Branch Page: Pre-selecting branch from user profile:", userProfileBranchId);
+          setSelectedBranchId(userProfileBranchId);
+        } else if (fetchedBranches.length === 1 && !selectedBranchId) {
             console.log("Tenant/Branch Page: Auto-selecting single branch:", fetchedBranches[0].name);
             setSelectedBranchId(fetchedBranches[0].id);
         } else if (selectedBranchId && !fetchedBranches.some(b => b.id === selectedBranchId)) {
@@ -207,7 +267,7 @@ export default function TenantBranchSelectionPage() {
       console.error(`Tenant/Branch Page: Error fetching branches for tenant ${selectedTenantId}:`, error);
       setFetchError(`Failed to load branches: ${error.message}. Check Firestore rules, collection "Branches", and "tenantId" field.`);
       setIsLoadingBranches(false);
-      setBranchesData([]); // Clear data on error
+      setBranchesData([]);
       setSelectedBranchId(undefined);
     });
 
@@ -215,11 +275,12 @@ export default function TenantBranchSelectionPage() {
       console.log(`Tenant/Branch Page: Cleaning up Branches listener for tenant: ${selectedTenantId}`);
       unsubscribeBranches();
     };
-  }, [selectedTenantId, currentUser, isAuthLoading]);
+  }, [selectedTenantId, currentUser, isAuthLoading, userProfileData, isLoadingUserProfile]);
 
   const getTenantPlaceholder = () => {
     if (isAuthLoading) return "Authenticating...";
     if (!currentUser && !isAuthLoading) return "Please log in";
+    if (isLoadingUserProfile) return "Loading user data...";
     if (isLoadingTenants) return "Loading tenants...";
     if (tenantsData.length === 0 && !fetchError && !!currentUser) return "No tenants available";
     return "Select a tenant...";
@@ -227,12 +288,13 @@ export default function TenantBranchSelectionPage() {
 
   const getBranchPlaceholder = () => {
     if (!selectedTenantId) return "Select a tenant first";
-    // if (isAuthLoading) return "Authenticating..."; // Covered by tenant checks
-    // if (!currentUser && !isAuthLoading) return "Please log in"; // Covered by tenant checks
+    if (isLoadingUserProfile && !branchesData.length) return "Loading user data..."; // Show if branches not yet loaded due to profile
     if (isLoadingBranches) return "Loading branches...";
     if (branchesData.length === 0 && !fetchError && !!currentUser && !!selectedTenantId) return "No branches for this tenant";
     return "Select a branch...";
   };
+
+  const isSelectionDisabled = isAuthLoading || !currentUser || isLoadingUserProfile || isLoadingTenants;
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4">
@@ -248,7 +310,7 @@ export default function TenantBranchSelectionPage() {
       <Card className="w-full max-w-md shadow-2xl z-10">
         <CardHeader className="text-center">
           <div className="mx-auto mb-4 inline-block rounded-full bg-primary p-3">
-            <Store className="h-10 w-10 text-primary-foreground" />
+            <UserIcon className="h-10 w-10 text-primary-foreground" />
           </div>
           <CardTitle className="text-3xl font-bold text-primary">{`Welcome to ${APP_NAME}`}</CardTitle>
           <CardDescription className="text-muted-foreground">
@@ -268,7 +330,7 @@ export default function TenantBranchSelectionPage() {
               <Link href="/login">Go to Login</Link>
             </Button>
           )}
-          {(currentUser || isAuthLoading) && (
+          {(currentUser || isAuthLoading || isLoadingUserProfile) && (
             <>
               <div className="space-y-2">
                 <label htmlFor="tenant-select" className="flex items-center text-sm font-medium text-foreground">
@@ -278,7 +340,7 @@ export default function TenantBranchSelectionPage() {
                 <Select 
                   value={selectedTenantId} 
                   onValueChange={handleTenantChange}
-                  disabled={isAuthLoading || !currentUser || isLoadingTenants || (tenantsData.length === 0 && !fetchError)}
+                  disabled={isSelectionDisabled || (tenantsData.length === 0 && !fetchError)}
                 >
                   <SelectTrigger id="tenant-select" className="w-full">
                     {(isLoadingTenants && currentUser) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -290,10 +352,10 @@ export default function TenantBranchSelectionPage() {
                         {tenant.name}
                       </SelectItem>
                     ))}
-                    {(isLoadingTenants && tenantsData.length === 0 && currentUser) && (
+                    {((isLoadingUserProfile || isLoadingTenants) && tenantsData.length === 0 && currentUser) && (
                          <div className="flex items-center justify-center p-2"><Loader2 className="mr-2 h-4 w-4 animate-spin" /><span>Loading...</span></div>
                     )}
-                    {(!isLoadingTenants && tenantsData.length === 0 && currentUser && !fetchError) && (
+                    {(!isLoadingUserProfile && !isLoadingTenants && tenantsData.length === 0 && currentUser && !fetchError) && (
                        <SelectItem value="no-tenants" disabled>No tenants found</SelectItem>
                     )}
                      {(!currentUser && !isAuthLoading) && (
@@ -303,7 +365,7 @@ export default function TenantBranchSelectionPage() {
                 </Select>
               </div>
 
-              { (selectedTenantId && currentUser && !isAuthLoading) && (
+              { (selectedTenantId && currentUser && !isAuthLoading && !isLoadingUserProfile) && (
                 <div className="space-y-2">
                   <label htmlFor="branch-select" className="flex items-center text-sm font-medium text-foreground">
                     <Store className="mr-2 h-4 w-4 text-muted-foreground" />
@@ -341,7 +403,7 @@ export default function TenantBranchSelectionPage() {
           <Button
             asChild
             className="w-full bg-accent text-accent-foreground hover:bg-accent/90"
-            disabled={isAuthLoading || !currentUser || !selectedTenantId || !selectedBranchId || isLoadingTenants || isLoadingBranches}
+            disabled={isAuthLoading || !currentUser || !selectedTenantId || !selectedBranchId || isLoadingTenants || isLoadingBranches || isLoadingUserProfile}
           >
             <Link href="/dashboard/menu">
               Enter Dashboard
@@ -357,4 +419,3 @@ export default function TenantBranchSelectionPage() {
     </div>
   );
 }
-

@@ -62,7 +62,7 @@ export default function RegisterPage() {
       title: "Registration Successful!",
       description: `Welcome, ${displayNameForProfile}! Your account has been created. (Firestore save is temporarily disabled)`,
     });
-    router.push('/dashboard/menu');
+    router.push('/'); // Redirect to tenant/branch selection page
   };
 
   const handleEmailPasswordRegister = async (e: React.FormEvent) => {

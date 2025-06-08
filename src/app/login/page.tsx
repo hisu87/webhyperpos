@@ -90,10 +90,10 @@ export default function LoginPage() {
     // });
     console.log("Toast temporarily disabled for debugging redirection.");
 
-    console.log("Attempting to redirect to /dashboard/menu...");
+    console.log("Attempting to redirect to / (Tenant/Branch selection page)...");
     setIsLoading(false); // Set loading false before navigation
-    router.push('/dashboard/menu');
-    console.log("router.push('/dashboard/menu') called.");
+    router.push('/'); // Redirect to tenant/branch selection page
+    console.log("router.push('/') called.");
   };
   
   useEffect(() => {
@@ -325,5 +325,3 @@ export default function LoginPage() {
     </div>
   );
 }
-
-    

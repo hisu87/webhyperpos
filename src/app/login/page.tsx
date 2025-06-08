@@ -1,11 +1,11 @@
 
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { auth, db } from '@/lib/firebase';
-import { GoogleAuthProvider, signInWithPopup, UserCredential as FirebaseUserCredential, signInWithEmailAndPassword, User as FirebaseUser } from 'firebase/auth';
+import { GoogleAuthProvider, signInWithRedirect, getRedirectResult, UserCredential as FirebaseUserCredential, signInWithEmailAndPassword, User as FirebaseUser } from 'firebase/auth';
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import type { User as AppUser } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -27,12 +27,43 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
+  useEffect(() => {
+    // Check for redirect result when the component mounts
+    const checkRedirectResult = async () => {
+      setIsLoading(true);
+      try {
+        const result = await getRedirectResult(auth);
+        if (result && result.user) {
+          toast({ title: "Google Sign-In Successful!", description: "Processing your information..." });
+          await processUserSignIn(result.user);
+        }
+      } catch (error: any) {
+        console.error('Error during Google redirect result processing:', error);
+        let errorMessage = "An unexpected error occurred during Google sign-in. Please try again.";
+        if (error.code === 'auth/account-exists-with-different-credential') {
+          errorMessage = "An account already exists with this email using a different sign-in method. Try signing in with that method.";
+        } else if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
+           errorMessage = "Sign-in process was cancelled or popup closed. Please try again if you wish to sign in.";
+        } else {
+          errorMessage = error.message || errorMessage;
+        }
+        toast({
+          title: "Google Sign-In Failed",
+          description: errorMessage,
+          variant: "destructive",
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    checkRedirectResult();
+  }, []); // Empty dependency array ensures this runs once on mount
+
   const processUserSignIn = async (firebaseUser: FirebaseUser) => {
-    // Step 1: Log all Firebase user info to console
     console.log("Firebase User Object (All Info):", firebaseUser);
     
-    // Step 2: "Save info" - currently this means setting a login timestamp in localStorage.
-    // Firestore save logic is temporarily disabled as per previous request.
+    // Firestore save logic is temporarily disabled
     /*
     const userRef = doc(db, 'users', firebaseUser.uid);
     const docSnap = await getDoc(userRef);
@@ -72,7 +103,6 @@ export default function LoginPage() {
       console.warn('localStorage not available, 4-hour session expiry may not work as expected.');
     }
     
-    // Step 3: Show toast notification
     const displayNameForToast = firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User';
     // The 'isNewUser' variable is part of the commented-out Firestore block.
     // if (isNewUser) {
@@ -91,7 +121,6 @@ export default function LoginPage() {
       description: `Welcome back, ${displayNameForToast}! (Firestore save is temporarily disabled)`,
     });
     
-    // Step 4: Redirect to homepage (dashboard/menu)
     router.push('/dashboard/menu');
   };
 
@@ -99,25 +128,17 @@ export default function LoginPage() {
     setIsLoading(true);
     const provider = new GoogleAuthProvider();
     try {
-      const result: FirebaseUserCredential = await signInWithPopup(auth, provider);
-      if (result.user) {
-        await processUserSignIn(result.user);
-      }
+      await signInWithRedirect(auth, provider);
+      // The page will redirect to Google. After Google redirects back,
+      // the useEffect hook will handle getRedirectResult.
     } catch (error: any) {
-      console.error('Error during Google sign-in:', error);
-      let errorMessage = "An unexpected error occurred. Please try again.";
-      if (error.code === 'auth/popup-closed-by-user') {
-        errorMessage = "Sign-in popup was closed. Please try again if you wish to sign in.";
-      } else {
-        errorMessage = error.message || errorMessage;
-      }
+      console.error('Error initiating Google sign-in redirect:', error);
       toast({
-        title: "Sign In Cancelled or Failed",
-        description: errorMessage,
+        title: "Google Sign-In Error",
+        description: "Could not start the Google sign-in process. Please try again.",
         variant: "destructive",
       });
-    } finally {
-      setIsLoading(false);
+      setIsLoading(false); // Reset loading if redirect initiation fails
     }
   };
 

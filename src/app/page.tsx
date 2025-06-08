@@ -60,8 +60,8 @@ function transformDocToBranch(docSnapshot: DocumentSnapshot<DocumentData> | Quer
 }
 
 interface UserProfileAccessData {
-  userBranchId?: string;       // branchId directly from user's profile
-  derivedTenantId?: string;    // tenantId obtained from the user's branch
+  userTenantId?: string;    // tenantId directly from user's profile
+  userBranchId?: string;    // branchId directly from user's profile
   role?: string;
 }
 
@@ -109,7 +109,7 @@ export default function TenantBranchSelectionPage() {
     };
   }, []);
 
-  // Effect to fetch user's profile (branchId, role) and then derive tenantId
+  // Effect to fetch user's profile (tenantId, branchId, role)
   useEffect(() => {
     if (isAuthLoading) {
       console.log("Tenant/Branch Page: Auth state still loading, waiting to fetch user profile.");
@@ -118,6 +118,7 @@ export default function TenantBranchSelectionPage() {
     if (!currentUser || !currentUser.email) {
       console.log("Tenant/Branch Page: No authenticated user or email, skipping user profile fetch.");
       setUserProfileAccess(null);
+      setIsLoadingUserProfile(false); // Ensure loading is false
       return;
     }
 
@@ -131,53 +132,32 @@ export default function TenantBranchSelectionPage() {
       if (!querySnapshot.empty) {
         const userDoc = querySnapshot.docs[0];
         const userData = userDoc.data() as AppUserType; 
+        const userTenantId = userData.tenantId;
         const userBranchId = userData.branchId;
         const userRole = userData.role;
-        console.log("Tenant/Branch Page: User profile found:", { userId: userDoc.id, userBranchId, userRole });
+        console.log("Tenant/Branch Page: User profile found:", { userId: userDoc.id, userTenantId, userBranchId, userRole });
+        setUserProfileAccess({ userTenantId, userBranchId, role: userRole });
 
-        if (userBranchId) {
-          console.log("Tenant/Branch Page: User has branchId:", userBranchId, ". Fetching branch to derive tenantId.");
-          const branchDocRef = doc(db, "Branches", userBranchId); // Assuming collection name is "Branches"
-          const branchDocSnap = await getDoc(branchDocRef);
-
-          if (branchDocSnap.exists()) {
-            const branchData = transformDocToBranch(branchDocSnap);
-            const derivedTenantId = branchData.tenantId;
-            if (derivedTenantId) {
-              console.log("Tenant/Branch Page: Derived tenantId from branch:", derivedTenantId);
-              setUserProfileAccess({ userBranchId, derivedTenantId, role: userRole });
-            } else {
-              console.warn("Tenant/Branch Page: Branch", userBranchId, "found, but it has no tenantId.");
-              setFetchError(`Your assigned branch (ID: ${userBranchId}) is missing tenant information. Please contact support.`);
-              setUserProfileAccess({ userBranchId, role: userRole }); 
-            }
-          } else {
-            console.warn("Tenant/Branch Page: User's assigned branchId:", userBranchId, "not found in Branches collection.");
-            setFetchError(`Your assigned branch (ID: ${userBranchId}) could not be found. Please contact support.`);
-            setUserProfileAccess({ userBranchId, role: userRole }); 
-          }
-        } else if (userRole === 'admin') {
-          console.log("Tenant/Branch Page: Admin user detected with no specific branchId. Will allow selection from all tenants.");
-          setUserProfileAccess({ role: userRole });
-        } else {
-          console.log("Tenant/Branch Page: User has no branchId and is not an admin who can see all tenants.");
-          setFetchError("You are not assigned to a specific branch or do not have permissions to view tenants.");
-          setUserProfileAccess({ role: userRole });
+        if (!userTenantId && userRole !== 'admin') {
+            setFetchError("Your user profile does not have an assigned tenant. Please contact support.");
+        } else if (userTenantId && !userBranchId && userRole !== 'admin' && userRole !== 'manager') { // Manager might not have a branch
+            // Allow tenant selection if user has a tenantId but no specific branchId (e.g., tenant-level manager)
+             console.log("Tenant/Branch Page: User has tenantId but no branchId. Role:", userRole);
         }
+
       } else {
         console.warn("Tenant/Branch Page: No user profile found in 'users' collection for email:", currentUser.email);
         setUserProfileAccess(null);
         setFetchError("User profile not found. Please contact support if this is unexpected.");
       }
     }).catch(error => {
-      console.error("Tenant/Branch Page: Error fetching user profile or branch details:", error);
+      console.error("Tenant/Branch Page: Error fetching user profile:", error);
       setFetchError(`Failed to load user access data: ${error.message}.`);
       setUserProfileAccess(null);
     }).finally(() => {
       setIsLoadingUserProfile(false);
       console.log("Tenant/Branch Page: User profile access fetching complete. UserProfileAccess:", userProfileAccess);
     });
-
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser, isAuthLoading]);
 
@@ -188,11 +168,11 @@ export default function TenantBranchSelectionPage() {
     setSelectedBranchId(undefined); 
   };
 
-  // Effect to load tenants based on derived access
+  // Effect to load tenants based on user profile access
   useEffect(() => {
     if (isAuthLoading || isLoadingUserProfile) {
       console.log("Tenant/Branch Page: Auth or User Profile still loading, waiting to fetch tenants.");
-      if (currentUser && !isLoadingUserProfile) setIsLoadingTenants(true); // Indicate loading if waiting for tenants
+      if (currentUser && !isLoadingUserProfile) setIsLoadingTenants(true);
       return;
     }
 
@@ -209,52 +189,50 @@ export default function TenantBranchSelectionPage() {
         console.log("Tenant/Branch Page: User profile access not determined after loading, cannot fetch tenants yet.");
         setTenantsData([]);
         setIsLoadingTenants(false);
-        // Error might be set by user profile fetcher, or if no profile, set a generic one.
         if (!fetchError && !isLoadingUserProfile) setFetchError("Could not determine user access permissions for tenants.");
         return;
     }
     
-    if (isLoadingUserProfile) { // Still waiting for profile details
+    if (isLoadingUserProfile) { 
         console.log("Tenant/Branch Page: Still waiting for user profile details before fetching tenants.");
         setIsLoadingTenants(true); 
         return;
     }
 
-
     setFetchError(null);
     setIsLoadingTenants(true);
     let unsubscribeTenants: Unsubscribe | undefined;
 
-    if (userProfileAccess?.derivedTenantId) {
-      console.log(`Tenant/Branch Page: Fetching specific tenant '${userProfileAccess.derivedTenantId}' based on user's branch.`);
-      const tenantDocRef = doc(db, "Tenants", userProfileAccess.derivedTenantId); // Assuming collection "Tenants"
+    if (userProfileAccess?.userTenantId) {
+      console.log(`Tenant/Branch Page: Fetching specific tenant '${userProfileAccess.userTenantId}' from user's profile.`);
+      const tenantDocRef = doc(db, "Tenants", userProfileAccess.userTenantId);
       unsubscribeTenants = onSnapshot(tenantDocRef, (docSnap) => {
         if (docSnap.exists()) {
           const tenant = transformDocToTenant(docSnap);
           console.log("Tenant/Branch Page: Specific tenant data received:", tenant.name);
           setTenantsData([tenant]);
           if (selectedTenantId !== tenant.id) { 
-            console.log("Tenant/Branch Page: Auto-selecting user's derived tenant:", tenant.name);
+            console.log("Tenant/Branch Page: Auto-selecting user's tenant from profile:", tenant.name);
             handleTenantChange(tenant.id);
           }
         } else {
-          console.warn(`Tenant/Branch Page: User's derived tenant '${userProfileAccess.derivedTenantId}' not found.`);
-          setFetchError(`Your assigned tenant (ID: ${userProfileAccess.derivedTenantId}) could not be found. Please contact support.`);
+          console.warn(`Tenant/Branch Page: User's assigned tenant '${userProfileAccess.userTenantId}' not found.`);
+          setFetchError(`Your assigned tenant (ID: ${userProfileAccess.userTenantId}) could not be found. Please contact support.`);
           setTenantsData([]);
           handleTenantChange(undefined);
         }
         setIsLoadingTenants(false);
       }, (error) => {
-        console.error(`Tenant/Branch Page: Error fetching specific tenant '${userProfileAccess.derivedTenantId}':`, error);
+        console.error(`Tenant/Branch Page: Error fetching specific tenant '${userProfileAccess.userTenantId}':`, error);
         setFetchError(`Failed to load assigned tenant: ${error.message}.`);
         setIsLoadingTenants(false);
         setTenantsData([]);
         handleTenantChange(undefined);
       });
 
-    } else if (userProfileAccess?.role === 'admin' && !userProfileAccess?.derivedTenantId) {
-      console.log("Tenant/Branch Page: Admin user (not tied to a specific branch/tenant), fetching all tenants.");
-      const tenantsQuery = query(collection(db, "Tenants")); // Assuming collection "Tenants"
+    } else if (userProfileAccess?.role === 'admin' && !userProfileAccess?.userTenantId) {
+      console.log("Tenant/Branch Page: Admin user (not tied to a specific tenant in profile), fetching all tenants.");
+      const tenantsQuery = query(collection(db, "Tenants"));
       unsubscribeTenants = onSnapshot(tenantsQuery, (querySnapshot) => {
         const fetchedTenants: Tenant[] = querySnapshot.docs.map(transformDocToTenant);
         setTenantsData(fetchedTenants);
@@ -282,10 +260,10 @@ export default function TenantBranchSelectionPage() {
       });
 
     } else {
-      console.log("Tenant/Branch Page: User not assigned to a tenant via branch or not an admin who can see all. No tenants to display.");
+      console.log("Tenant/Branch Page: User not assigned to a tenant via profile or not an admin who can see all. No tenants to display.");
       setTenantsData([]);
       setIsLoadingTenants(false);
-      if (currentUser && !isLoadingUserProfile && !fetchError && userProfileAccess && (!userProfileAccess.derivedTenantId && userProfileAccess.role !== 'admin')) {
+      if (currentUser && !isLoadingUserProfile && !fetchError && userProfileAccess && !userProfileAccess.userTenantId && userProfileAccess.role !== 'admin') {
           setFetchError(fetchError || "You are not assigned to a tenant or do not have permissions to view tenants.");
       }
       handleTenantChange(undefined);
@@ -322,7 +300,7 @@ export default function TenantBranchSelectionPage() {
     setIsLoadingBranches(true);
     console.log(`Tenant/Branch Page: Setting up Firestore listener for Branches of tenant: ${selectedTenantId}`);
 
-    const branchesQuery = query(collection(db, "Branches"), where("tenantId", "==", selectedTenantId)); // Assuming collection "Branches"
+    const branchesQuery = query(collection(db, "Branches"), where("tenantId", "==", selectedTenantId));
     const unsubscribeBranches = onSnapshot(branchesQuery, (querySnapshot) => {
       const fetchedBranches: Branch[] = querySnapshot.docs.map(transformDocToBranch);
       setBranchesData(fetchedBranches);
@@ -331,18 +309,18 @@ export default function TenantBranchSelectionPage() {
 
       if (fetchedBranches.length === 0) {
         console.warn(`Tenant/Branch Page: No branches found for tenantId '${selectedTenantId}'.`);
-        if (userProfileAccess?.userBranchId && userProfileAccess?.derivedTenantId === selectedTenantId) {
+        if (userProfileAccess?.userBranchId && userProfileAccess?.userTenantId === selectedTenantId) {
             setFetchError(`Your assigned branch (ID: ${userProfileAccess.userBranchId}) was not found for tenant ${selectedTenantId}.`);
         }
       } else {
-        const userAssignedBranchId = userProfileAccess?.userBranchId;
-        const tenantMatchesUserDerivedTenant = userProfileAccess?.derivedTenantId === selectedTenantId;
+        const userAssignedBranchIdFromProfile = userProfileAccess?.userBranchId;
+        const tenantMatchesUserAssignedTenant = userProfileAccess?.userTenantId === selectedTenantId;
         const currentSelectionIsValid = fetchedBranches.some(b => b.id === selectedBranchId);
 
-        if (userAssignedBranchId && tenantMatchesUserDerivedTenant && fetchedBranches.some(b => b.id === userAssignedBranchId)) {
-          if (selectedBranchId !== userAssignedBranchId) {
-            console.log("Tenant/Branch Page: Pre-selecting branch from user profile:", userAssignedBranchId);
-            setSelectedBranchId(userAssignedBranchId);
+        if (userAssignedBranchIdFromProfile && tenantMatchesUserAssignedTenant && fetchedBranches.some(b => b.id === userAssignedBranchIdFromProfile)) {
+          if (selectedBranchId !== userAssignedBranchIdFromProfile) {
+            console.log("Tenant/Branch Page: Pre-selecting branch from user profile:", userAssignedBranchIdFromProfile);
+            setSelectedBranchId(userAssignedBranchIdFromProfile);
           }
         } else if (fetchedBranches.length === 1 && (!selectedBranchId || !currentSelectionIsValid)) {
             console.log("Tenant/Branch Page: Auto-selecting single branch:", fetchedBranches[0].name);
@@ -375,7 +353,7 @@ export default function TenantBranchSelectionPage() {
     if (isLoadingUserProfile) return "Loading user data...";
     if (isLoadingTenants) return "Loading tenants...";
     if (tenantsData.length === 0 && !fetchError && !!currentUser && !isLoadingUserProfile && !isLoadingTenants) {
-        if (userProfileAccess && !userProfileAccess.derivedTenantId && userProfileAccess.role !== 'admin') {
+        if (userProfileAccess && !userProfileAccess.userTenantId && userProfileAccess.role !== 'admin') {
             return "Not assigned to a tenant";
         }
         return "No tenants available";
@@ -440,7 +418,7 @@ export default function TenantBranchSelectionPage() {
                 <Select 
                   value={selectedTenantId} 
                   onValueChange={handleTenantChange}
-                  disabled={isSelectionDisabled || (tenantsData.length === 0 && !fetchError && !isLoadingTenants)}
+                  disabled={isSelectionDisabled || (tenantsData.length === 0 && !fetchError && !isLoadingTenants) || (!!userProfileAccess?.userTenantId && tenantsData.length === 1)}
                 >
                   <SelectTrigger id="tenant-select" className="w-full">
                     {(isLoadingUserProfile || (isLoadingTenants && currentUser && !isLoadingUserProfile)) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -519,4 +497,6 @@ export default function TenantBranchSelectionPage() {
     </div>
   );
 }
+    
+
     

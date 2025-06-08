@@ -38,14 +38,11 @@ export default function LoginPage() {
 
         if (result && result.user) {
           console.log("Google redirect result HAS a user. Processing sign-in...");
-          toast({ title: "Google Sign-In Successful!", description: "Processing your information..." });
+          // Toast for Google Sign-In success is now handled within processUserSignIn
           await processUserSignIn(result.user);
         } else {
           console.log("No active Google redirect result found or result.user is null.");
-          // If no redirect result, it might be a normal page load or user is already signed in via session
-          // The onAuthStateChanged in AppLayout will handle existing sessions.
-          // We can set isLoading to false if no redirect processing is needed.
-          setIsLoading(false); 
+          setIsLoading(false);
         }
       } catch (error: any) {
         console.error('Error during Google redirect result processing:', error);
@@ -64,9 +61,6 @@ export default function LoginPage() {
         });
         setIsLoading(false);
       }
-      // setIsLoading(false) might be called too early if processUserSignIn redirects
-      // It's generally set to false when auth state is resolved or an error occurs.
-      // If processUserSignIn is successful, redirection will happen, so loading state on this page becomes less relevant.
     };
 
     checkRedirectResult();
@@ -76,7 +70,7 @@ export default function LoginPage() {
   const processUserSignIn = async (firebaseUser: FirebaseUser) => {
     console.log("ProcessUserSignIn called. Firebase User Object (All Info):", firebaseUser);
     
-    // Firestore save logic is temporarily disabled
+    // Firestore save logic is explicitly disabled as per user request
     /*
     const userRef = doc(db, 'users', firebaseUser.uid);
     const docSnap = await getDoc(userRef);
@@ -99,44 +93,31 @@ export default function LoginPage() {
         createdAt: serverTimestamp() as unknown as Date,
         updatedAt: serverTimestamp() as unknown as Date,
       };
-      await setDoc(userRef, newUser);
+      // await setDoc(userRef, newUser); // Ensure this is commented out
     } else {
-      await setDoc(userRef, {
-        displayName: displayName || docSnap.data()?.displayName,
-        email: firebaseUser.email || docSnap.data()?.email, 
-        photoURL: photoURL || docSnap.data()?.photoURL,
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
+      // await setDoc(userRef, { // Ensure this is commented out
+      //   displayName: displayName || docSnap.data()?.displayName,
+      //   email: firebaseUser.email || docSnap.data()?.email, 
+      //   photoURL: photoURL || docSnap.data()?.photoURL,
+      //   updatedAt: serverTimestamp(),
+      // }, { merge: true });
     }
     */
 
     try {
       localStorage.setItem('loginTimestamp', Date.now().toString());
-      console.log("Login timestamp saved to localStorage.");
+      console.log("Login timestamp saved to localStorage for session management.");
     } catch (e) {
       console.warn('localStorage not available, 4-hour session expiry may not work as expected.');
     }
     
     const displayNameForToast = firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User';
-    // The 'isNewUser' variable is part of the commented-out Firestore block.
-    // if (isNewUser) {
-    //   toast({
-    //     title: "Welcome!",
-    //     description: "Your account has been created.",
-    //   });
-    // } else {
-    //   toast({
-    //     title: "Sign In Successful",
-    //     description: `Welcome back, ${displayNameForToast}!`,
-    //   });
-    // }
-     toast({
+    toast({
       title: "Sign In Successful",
-      description: `Welcome back, ${displayNameForToast}! (Firestore save is temporarily disabled)`,
+      description: `Welcome back, ${displayNameForToast}! (User data not saved to Firestore)`,
     });
     console.log("Pushing to /dashboard/menu...");
     router.push('/dashboard/menu');
-    // After router.push, it's good practice to ensure loading state is false if the component might not unmount immediately
     setIsLoading(false); 
   };
 
@@ -146,10 +127,6 @@ export default function LoginPage() {
     try {
       console.log("Initiating Google sign-in with redirect...");
       await signInWithRedirect(auth, provider);
-      // The page will redirect to Google. After Google redirects back,
-      // the useEffect hook will handle getRedirectResult.
-      // setIsLoading(false) here might be premature as the redirect is happening.
-      // The loading state should persist until the redirect flow completes or fails.
     } catch (error: any) {
       console.error('Error initiating Google sign-in redirect:', error);
       let toastMessage = "Could not start the Google sign-in process. Please try again.";
@@ -163,7 +140,7 @@ export default function LoginPage() {
         description: toastMessage,
         variant: "destructive",
       });
-      setIsLoading(false); // Reset loading if redirect initiation fails
+      setIsLoading(false);
     }
   };
 
@@ -183,8 +160,7 @@ export default function LoginPage() {
       if (result.user) {
         await processUserSignIn(result.user);
       }
-    } catch (error: any)
-       {
+    } catch (error: any) {
       console.error('Error during email/password sign-in:', error);
       let errorMessage = "An unexpected error occurred. Please try again.";
       if (error.code) {
@@ -198,7 +174,7 @@ export default function LoginPage() {
             errorMessage = "Please enter a valid email address.";
             break;
           default:
-            errorMessage = error.message;
+            errorMessage = error.message || "An unexpected error occurred.";
         }
       }
       toast({
@@ -206,15 +182,9 @@ export default function LoginPage() {
         description: errorMessage,
         variant: "destructive",
       });
-    } finally {
-      // setIsLoading(false) here is tricky if processUserSignIn redirects.
-      // If it doesn't redirect (e.g., error before redirect), then it's fine.
-      // If it does redirect, the component unmounts.
-      // Let processUserSignIn handle its own isLoading for success cases.
-      if (!router.asPath.includes('/dashboard')) { // A way to check if redirection has likely started
-         setIsLoading(false);
-      }
+      setIsLoading(false); // Ensure loading is false on error
     }
+    // No finally setIsLoading(false) here, as processUserSignIn handles it or redirects
   };
 
 
@@ -270,12 +240,12 @@ export default function LoginPage() {
               className="w-full"
               disabled={isLoading}
             >
-              {isLoading ? (
+              {isLoading && !auth.currentUser ? ( // Show spinner only if actively trying to log in
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : (
                 <Mail className="mr-2 h-4 w-4" />
               )}
-              {isLoading ? 'Signing In...' : 'Sign In with Email'}
+              {isLoading && !auth.currentUser ? 'Signing In...' : 'Sign In with Email'}
             </Button>
           </form>
 
@@ -294,9 +264,9 @@ export default function LoginPage() {
             onClick={handleGoogleSignIn}
             variant="outline"
             className="w-full"
-            disabled={isLoading}
+            disabled={isLoading && !auth.currentUser} // Disable if any loading operation is in progress
           >
-            {isLoading ? (
+            {isLoading && !auth.currentUser ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
               <Chrome className="mr-2 h-4 w-4" />

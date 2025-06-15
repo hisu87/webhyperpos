@@ -1,3 +1,4 @@
+
 "use client"
 
 import * as React from "react"
@@ -16,20 +17,32 @@ import {
 
 interface DatePickerWithRangeProps extends React.HTMLAttributes<HTMLDivElement> {
     initialDateRange?: DateRange;
+    onUpdate?: (range: DateRange | undefined) => void; // Added onUpdate prop
 }
 
 export function DatePickerWithRange({
   className,
-  initialDateRange
+  initialDateRange,
+  onUpdate
 }: DatePickerWithRangeProps) {
   const [date, setDate] = React.useState<DateRange | undefined>(initialDateRange || {
-    from: new Date(), // Default to today or a relevant past date
-    to: addDays(new Date(), 7), // Default to 7 days from today
+    from: new Date(),
+    to: addDays(new Date(), 7),
   });
+  const [isOpen, setIsOpen] = React.useState(false);
+
+  const handleSelect = (selectedRange: DateRange | undefined) => {
+    setDate(selectedRange);
+    if (onUpdate) {
+      onUpdate(selectedRange);
+    }
+    // Optional: close popover on select, or require a button click
+    // setIsOpen(false); 
+  }
 
   return (
     <div className={cn("grid gap-2", className)}>
-      <Popover>
+      <Popover open={isOpen} onOpenChange={setIsOpen}>
         <PopoverTrigger asChild>
           <Button
             id="date"
@@ -38,6 +51,7 @@ export function DatePickerWithRange({
               "w-[300px] justify-start text-left font-normal",
               !date && "text-muted-foreground"
             )}
+            onClick={() => setIsOpen(true)}
           >
             <CalendarIcon className="mr-2 h-4 w-4" />
             {date?.from ? (
@@ -60,9 +74,10 @@ export function DatePickerWithRange({
             mode="range"
             defaultMonth={date?.from}
             selected={date}
-            onSelect={setDate}
+            onSelect={handleSelect}
             numberOfMonths={2}
           />
+           {/* Optional: Add Apply/Cancel buttons here if you don't close on select */}
         </PopoverContent>
       </Popover>
     </div>

@@ -4,7 +4,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
-import { initializeFirebaseClient, auth as getAuthInstance, db as getDbInstance } from '@/lib/firebase'; // Updated import
+import { initializeFirebaseClient, auth as getAuthInstance, db as getDbInstance } from '@/lib/firebase';
 import { GoogleAuthProvider, signInWithRedirect, getRedirectResult, UserCredential as FirebaseUserCredential, signInWithEmailAndPassword, User as FirebaseUser, Auth } from 'firebase/auth';
 import { doc, setDoc, getDoc, serverTimestamp, Firestore } from 'firebase/firestore';
 import type { User as AppUser } from '@/lib/types';
@@ -23,12 +23,13 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export default function LoginPage() {
   const router = useRouter();
   const { toast } = useToast();
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(true); // Start true to cover initial auth check
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [firebaseInitialized, setFirebaseInitialized] = useState(false);
 
   useEffect(() => {
+    // This effect should run only once on mount to initialize Firebase
     try {
       initializeFirebaseClient();
       setFirebaseInitialized(true);
@@ -42,12 +43,50 @@ export default function LoginPage() {
       });
       setIsLoading(false); // Stop loading if Firebase init fails
     }
-  }, [toast]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Empty dependency array ensures this runs once on mount
 
   const processUserSignIn = async (firebaseUser: FirebaseUser) => {
     console.log("ProcessUserSignIn called. Firebase User ID:", firebaseUser.uid);
     // Firestore save logic is explicitly disabled
-    // ... (existing commented out Firestore logic) ...
+    // const db = getDbInstance();
+    // if (db) {
+    //   const userRef = doc(db, 'users', firebaseUser.uid);
+    //   const userSnap = await getDoc(userRef);
+
+    //   if (!userSnap.exists()) {
+    //     const displayName = firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User';
+    //     const photoURL = firebaseUser.photoURL || `https://placehold.co/100x100.png?text=${displayName.charAt(0).toUpperCase()}`;
+        
+    //     const newUserDocument: Partial<AppUser> = { // Using Partial as ID is implicitly userRef.id
+    //       firebaseUid: firebaseUser.uid,
+    //       email: firebaseUser.email || '',
+    //       username: displayName, // Was displayName
+    //       role: 'customer', // Default role for new sign-ups via Google if not in DB
+    //       active: true,
+    //       createdAt: serverTimestamp(),
+    //       updatedAt: serverTimestamp(),
+    //       // tenant and branch would typically be set through a different flow for non-admins
+    //     };
+    //     try {
+    //       await setDoc(userRef, newUserDocument, { merge: true });
+    //       console.log("New user document created/merged in Firestore for UID:", firebaseUser.uid);
+    //     } catch (dbError) {
+    //       console.error("Error saving new user to Firestore:", dbError);
+    //       toast({
+    //         title: "Database Error",
+    //         description: "Could not save user profile. Some features might be limited.",
+    //         variant: "destructive",
+    //       });
+    //     }
+    //   } else {
+    //     console.log("User document already exists in Firestore for UID:", firebaseUser.uid);
+    //     // Optionally update updatedAt or other fields here
+    //     // await setDoc(userRef, { updatedAt: serverTimestamp() }, { merge: true });
+    //   }
+    // } else {
+    //   console.warn("LoginPage: Firestore instance not available, skipping user document check/creation.");
+    // }
 
     try {
       localStorage.setItem('loginTimestamp', Date.now().toString());
@@ -63,7 +102,7 @@ export default function LoginPage() {
     //   title: "Sign In Successful",
     //   description: `Welcome back, ${displayNameForToast}! (User data not saved to Firestore)`,
     // });
-    console.log("Toast temporarily disabled for debugging redirection.");
+    // console.log("Toast temporarily disabled for debugging redirection.");
 
     console.log("Attempting to redirect to / (Tenant/Branch selection page)...");
     setIsLoading(false);
@@ -74,6 +113,7 @@ export default function LoginPage() {
   useEffect(() => {
     if (!firebaseInitialized) {
       console.log("LoginPage useEffect (auth check): Firebase not initialized yet.");
+      // setIsLoading still true by default or from previous effect
       return;
     }
     console.log("LoginPage useEffect running to check auth state and redirect result.");
@@ -86,13 +126,14 @@ export default function LoginPage() {
     }
 
     const checkAuthAndRedirect = async () => {
-      setIsLoading(true);
-      console.log("LoginPage useEffect: setIsLoading(true)");
+      // setIsLoading(true) is already set or handled by the init useEffect
+      console.log("LoginPage useEffect: setIsLoading state is currently:", isLoading); // Check current state
       try {
+        // Check for current user first (handles page refresh if already logged in)
         if (auth.currentUser) {
           console.log("LoginPage useEffect: Firebase auth.currentUser already exists. Processing user:", auth.currentUser.uid);
           await processUserSignIn(auth.currentUser);
-          return;
+          return; // User processed, redirect will happen in processUserSignIn
         }
 
         console.log("LoginPage useEffect: auth.currentUser is null. Calling getRedirectResult(auth)...");
@@ -110,11 +151,13 @@ export default function LoginPage() {
       } catch (error: any) {
         console.error('LoginPage useEffect: Error during auth state/redirect processing:', error);
         let errorMessage = "An unexpected error occurred during Google sign-in. Please try again.";
+        // More specific error handling based on error.code
         if (error.code === 'auth/account-exists-with-different-credential') {
           errorMessage = "An account already exists with this email using a different sign-in method. Try signing in with that method.";
         } else if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
            errorMessage = "Sign-in process was cancelled or popup closed. Please try again if you wish to sign in.";
         } else {
+          // Keep generic or use error.message if available and user-friendly
           errorMessage = error.message || errorMessage;
         }
         toast({
@@ -129,7 +172,7 @@ export default function LoginPage() {
 
     checkAuthAndRedirect();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [firebaseInitialized, toast]); // Added toast to dependency array due to its usage in error handling
+  }, [firebaseInitialized]); // Runs when firebaseInitialized changes to true
 
 
   const handleGoogleSignIn = async () => {
@@ -172,13 +215,15 @@ export default function LoginPage() {
   const handleEmailPasswordSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!firebaseInitialized) {
-      toast({ title: "Initialization Pending", description: "Please wait a moment for services to load.", variant: "default" });
+      toast({ title: "Initialization Pending", description: "Services are loading. Please try again shortly.", variant: "default" });
       return;
     }
+
     const auth = getAuthInstance();
     if (!auth) {
         console.error("LoginPage: Auth instance not available for Email/Password Sign In.");
-        toast({ title: "Error", description: "Authentication service not ready.", variant: "destructive" });
+        toast({ title: "Error", description: "Authentication service not ready. Please refresh.", variant: "destructive" });
+        setIsLoading(false); // Reset loading state
         return;
     }
 
@@ -194,10 +239,11 @@ export default function LoginPage() {
     try {
       const result: FirebaseUserCredential = await signInWithEmailAndPassword(auth, email, password);
       if (result.user) {
-        await processUserSignIn(result.user); 
+        await processUserSignIn(result.user); // This will handle setIsLoading(false) and navigate
       } else {
+        // This case should ideally not happen if signInWithEmailAndPassword resolves successfully
         console.warn("signInWithEmailAndPassword resolved but result.user is null.");
-        setIsLoading(false); 
+        setIsLoading(false); // Ensure loading is stopped
       }
     } catch (error: any) {
       console.error('Error during email/password sign-in:', error);
@@ -206,14 +252,15 @@ export default function LoginPage() {
         switch (error.code) {
           case 'auth/user-not-found':
           case 'auth/wrong-password':
-          case 'auth/invalid-credential':
+          case 'auth/invalid-credential': // Common for wrong email/password
             errorMessage = "Invalid email or password. Please try again.";
             break;
           case 'auth/invalid-email':
             errorMessage = "Please enter a valid email address.";
             break;
+          // Add other specific Firebase error codes as needed
           default:
-            errorMessage = error.message || "An unexpected error occurred.";
+            errorMessage = error.message || "An unexpected error occurred."; // Use Firebase message if available
         }
       }
       toast({
@@ -278,12 +325,12 @@ export default function LoginPage() {
               className="w-full"
               disabled={isLoading || !firebaseInitialized}
             >
-              {isLoading && firebaseInitialized ? ( 
+              {(isLoading && firebaseInitialized) ? ( // Show loader only if initialized and loading
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : (
                 <Mail className="mr-2 h-4 w-4" />
               )}
-              {isLoading && firebaseInitialized ? 'Signing In...' : 'Sign In with Email'}
+              {(isLoading && firebaseInitialized) ? 'Signing In...' : 'Sign In with Email'}
             </Button>
           </form>
 
@@ -302,9 +349,9 @@ export default function LoginPage() {
             onClick={handleGoogleSignIn}
             variant="outline"
             className="w-full"
-            disabled={isLoading || !firebaseInitialized} 
+            disabled={isLoading || !firebaseInitialized} // Disable if not initialized or already loading
           >
-            {isLoading && firebaseInitialized ? ( 
+            {(isLoading && firebaseInitialized) ? ( // Show loader only if initialized and loading
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
               <Chrome className="mr-2 h-4 w-4" />
@@ -330,3 +377,5 @@ export default function LoginPage() {
     </div>
   );
 }
+    
+    

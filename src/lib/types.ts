@@ -1,4 +1,6 @@
 
+// src/lib/types.ts
+
 // Firestore Timestamp type, assuming you'll import it from 'firebase/firestore' where needed
 // For simplicity in this types file, we'll use 'any' or 'Date' as placeholders.
 // In actual Firestore operations, use `Timestamp` from 'firebase/firestore'.
@@ -6,28 +8,57 @@
 // Denormalized map types
 export interface DenormalizedTenantRef {
   id: string;
-  name?: string; // Optional as some references only need id
+  name: string; // Tên bắt buộc khi phi chuẩn hóa để luôn có thể hiển thị
 }
 
 export interface DenormalizedBranchRef {
   id:string;
-  name?: string; // Optional
+  name: string; // Tên bắt buộc khi phi chuẩn hóa
 }
 
 export interface DenormalizedUserRef {
   id: string;
-  username?: string;
+  username: string; // Tên đăng nhập bắt buộc khi phi chuẩn hóa
 }
 
 export interface DenormalizedOrderRef {
     id: string;
-    orderNumber?: string;
+    orderNumber: string; // Số đơn hàng bắt buộc khi phi chuẩn hóa
 }
 
 export interface DenormalizedPromotionRef {
     id: string;
-    code?: string;
+    code: string; // Mã khuyến mãi bắt buộc khi phi chuẩn hóa
+    name?: string; // Tên chương trình (optional)
 }
+
+export interface DenormalizedMenuItemRef {
+    id: string;
+    name: string;
+    price: number; // Giá tại thời điểm tham chiếu (denormalized)
+    unit: string; // Đơn vị tính (denormalized)
+}
+
+export interface DenormalizedIngredientRef {
+    id: string;
+    name: string;
+    unit: string;
+}
+
+export interface DenormalizedMenuRef {
+    id: string;
+    name: string;
+}
+
+export interface DenormalizedTableRef {
+  id: string;
+  tableNumber: string;
+}
+export interface DenormalizedCustomerRef {
+  id: string;
+  name: string;
+}
+
 
 // 1. Core & Quản lý Truy cập
 export interface Tenant {
@@ -55,7 +86,7 @@ export interface User {
   role: 'staff' | 'cashier' | 'manager' | 'admin' | string;
   hashedPinCode?: string;
   active: boolean;
-  tenant?: { id: string }; // Object containing { id: string }
+  tenant?: DenormalizedTenantRef; // Object containing { id: string, name: string }
   branch?: DenormalizedBranchRef; // { id: string, name: string }
   createdAt: any; // Timestamp
   updatedAt: any; // Timestamp
@@ -65,9 +96,10 @@ export interface User {
 export interface Menu {
   id: string; // Document ID
   name: string;
+  version: string; // Thêm trường version từ seed script
   isActive: boolean;
-  tenant: { id: string }; // Object containing { id: string }
-  description?: string; // Added from previous context, confirm if needed
+  tenant: DenormalizedTenantRef; // Object containing { id: string, name: string }
+  description?: string;
   createdAt: any; // Timestamp
   updatedAt: any; // Timestamp
   // MenuItems will be in a sub-collection
@@ -75,37 +107,45 @@ export interface Menu {
 
 export interface MenuItem { // Represents items in /menus/{menuId}/items/{itemId}
   id: string; // Document ID
+  menu: DenormalizedMenuRef; // Thêm reference tới menu
   name: string;
   category: string;
   price: number;
   unit: string;
   available: boolean;
-  // Fields like description, imageUrl, etc., are not in the new strict schema for this sub-collection item.
-  // If needed, they could be added or fetched from a "master" MenuItem collection.
-  // For now, adhering to the provided schema.
-  // `recipe` will be in a sub-collection
+  imageUrl?: string; // Thêm trường imageUrl từ seed script
+  tags?: string[]; // Thêm trường tags từ seed script
+  createdAt: any; // Timestamp
+  updatedAt: any; // Timestamp
+  // `recipe` will be in a sub-collection 'recipes'
 }
 
-export interface MenuItemRecipeItem { // Represents items in /menus/{menuId}/items/{itemId}/recipe/{ingredientId}
-  // The document ID for these items IS the ingredientId
+
+export interface MenuItemRecipeItem { // Represents items in /menus/{menuId}/items/{itemId}/recipes/{ingredientId}
+  id: string; // Document ID (this *is* the ingredientId)
+  menuItem: DenormalizedMenuItemRef; // Reference to menu item
+  ingredient: DenormalizedIngredientRef; // Reference to ingredient
   quantityNeeded: number;
-  unit: string; // e.g., 'gram', 'ml'
-  ingredientName: string; // Denormalized
+  createdAt: any; // Timestamp
+  updatedAt: any; // Timestamp
 }
 
 export interface CafeTable { // Represents items in /branches/{branchId}/tables/{tableId}
   id: string; // Document ID
   tableNumber: string;
   zone?: string;
-  status: 'available' | 'occupied' | 'reserved' | string;
+  capacity?: number; // Thêm lại từ seed script
+  status: 'available' | 'occupied' | 'reserved' | 'cleaning' | string; // Thêm 'cleaning'
+  isActive: boolean; // Thêm từ seed script
   currentOrder?: DenormalizedOrderRef; // { id: string, orderNumber: string } when occupied
-  capacity?: number; // From old schema, added for consideration
-  // `branchId` is implicit from the path
+  branch: DenormalizedBranchRef; // Thêm reference tới branch
+  createdAt: any; // Timestamp
+  updatedAt: any; // Timestamp
 }
 
 
 // 3. Khuyến mãi & Khách hàng thân thiết
-export interface Promotion {
+export interface Promotion { // Old: DiscountPromotions
   id: string; // Document ID
   name: string;
   code: string; // Customer-facing code
@@ -115,20 +155,21 @@ export interface Promotion {
   startDate: any; // Timestamp
   endDate: any; // Timestamp
   isActive: boolean;
-  tenantId: string; // Reference to Tenant
-  createdAt?: any; // Timestamp
-  updatedAt?: any; // Timestamp
+  appliesTo: 'all_orders' | 'specific_items' | string; // Thêm trường appliesTo từ seed script
+  tenant: DenormalizedTenantRef; // { id: string, name: string } - Thay thế tenantId
+  createdAt: any; // Timestamp
+  updatedAt: any; // Timestamp
 }
 
-export interface Customer {
+export interface CustomerLoyalty { // Đổi tên từ Customer cho rõ ràng
   id: string; // Document ID
   name: string;
   phoneNumber: string; // Used for lookup
   email?: string;
   totalPoints: number;
-  tenantId: string; // Reference to Tenant
-  createdAt?: any; // Timestamp
-  updatedAt?: any; // Timestamp
+  tenant: DenormalizedTenantRef; // { id: string, name: string } - Thay thế tenantId
+  createdAt: any; // Timestamp
+  updatedAt: any; // Timestamp
 }
 
 // 4. Quản lý Đơn hàng & Thanh toán
@@ -137,59 +178,49 @@ export interface Order { // Represents items in /branches/{branchId}/orders/{ord
   orderNumber: string; // User-friendly order number
   status: 'pending' | 'open' | 'preparing' | 'ready' | 'served' | 'paid' | 'completed' | 'cancelled' | 'refunded' | string;
   type: 'dine-in' | 'takeout' | 'delivery' | string;
-  totalAmount: number; // Subtotal before discount
-  discount?: number;
-  finalAmount: number; // Amount after discount
+  totalAmount: number; // Tổng số tiền đơn hàng (đã tính giảm giá, thuế...)
+  discount?: number; // Giá trị giảm giá
+  finalAmount: number; // Số tiền cuối cùng sau giảm giá và thuế
   user: DenormalizedUserRef; // { id: string, username: string }
-  table?: DenormalizedTableRef; // { id: string, tableNumber: string } - Adjusted name
+  table?: DenormalizedTableRef; // { id: string, tableNumber: string }
   customer?: DenormalizedCustomerRef; // { id: string, name: string }
   promotion?: DenormalizedPromotionRef; // { id: string, code: string }
+  tenant: DenormalizedTenantRef; // THÊM: Phi chuẩn hóa thông tin tenant
+  branch: DenormalizedBranchRef; // THÊM: Phi chuẩn hóa thông tin branch
   createdAt: any; // Timestamp
   paidAt?: any; // Timestamp
-  updatedAt?: any; // Timestamp
-  // `branchId` is implicit from path
-  // `tenantId` could be denormalized here or fetched via branch if needed often
+  updatedAt: any; // Timestamp
   // OrderItems will be in a sub-collection
-}
-// Helper types for denormalized fields in Order
-export interface DenormalizedTableRef {
-  id: string;
-  tableNumber: string;
-}
-export interface DenormalizedCustomerRef {
-  id: string;
-  name: string;
 }
 
 
 export interface OrderItem { // Represents items in /branches/{branchId}/orders/{orderId}/items/{orderItemId}
-  id: string; // Document ID
-  menuItemId: string; // Original MenuItem ID
-  menuItemName: string; // Denormalized
-  unitPrice: number; // Denormalized price at time of order
+  id: string; // Document ID (local ID for UI, UUID for Firestore)
+  menuItem: DenormalizedMenuItemRef; // Reference to original MenuItem with its denormalized name, price, unit
   quantity: number;
   note?: string;
-  // `orderId` and `branchId` are implicit from path
-}
-
-// UI specific type for cart, distinct from persisted OrderItem
-export interface CartItem extends MenuItem { // This MenuItem refers to the one from Menu sub-collection
-  cartItemId: string; // Unique ID for the item in the cart
-  quantityInCart: number; // Renamed from 'quantity' to avoid clash
-  notes?: string;
-  // selectedOptions?: Record<string, string>; // If options are a feature
-  // calculatedPrice: number; // if price can vary with options
+  createdAt?: any; // Timestamp
+  updatedAt?: any; // Timestamp
+  // Compatibility with old structure that had price and name directly
+  price?: number; // Old: unitPrice
+  name?: string; // Old: menuItemName
+  menuItemId?: string; // Old, now part of DenormalizedMenuItemRef.id
+  unitPrice?: number; // Old, now part of DenormalizedMenuItemRef.price
+  menuItemName?: string; // Old, now part of DenormalizedMenuItemRef.name
 }
 
 
 export interface QRPaymentRequest { // Represents items in /branches/{branchId}/orders/{orderId}/qrPaymentRequests/{requestId}
   id: string; // Document ID
+  order: DenormalizedOrderRef; // Reference to Order
   amount: number;
   status: 'pending' | 'paid' | 'expired' | 'failed' | string;
   qrContent: string; // String to render QR code
   expiresAt: any; // Timestamp
-  createdAt?: any; // Timestamp
-  // `orderId` and `branchId` are implicit from path
+  createdAt: any; // Timestamp
+  updatedAt: any; // Timestamp
+  branch: DenormalizedBranchRef; // Thêm reference tới branch
+  tenant: DenormalizedTenantRef; // Thêm reference tới tenant
 }
 
 // 5. Quản lý Kho & Nguyên liệu
@@ -199,37 +230,37 @@ export interface Ingredient { // Represents items in /ingredients/{ingredientId}
   unit: string; // Base unit: 'ml', 'gram', 'kg', etc.
   lowStockThreshold?: number;
   tenantId: string; // Reference to Tenant
-  createdAt?: any; // Timestamp
-  updatedAt?: any; // Timestamp
-  category?: string; // From previous type
-  description?: string; // From previous type
+  createdAt: any; // Timestamp
+  updatedAt: any; // Timestamp
+  category?: string; // Thêm từ seed script
+  description?: string; // Thêm từ seed script
 }
 
 export interface BranchInventoryItem { // Represents items in /branches/{branchId}/inventory/{ingredientId}
-  // The document ID for these items IS the ingredientId
+  id: string; // Document ID (this *is* the ingredientId)
+  branch: DenormalizedBranchRef; // Reference to branch
+  ingredient: DenormalizedIngredientRef; // Reference to ingredient
   currentQuantity: number; // Aggregated, updated by Cloud Function
-  ingredientName: string; // Denormalized
-  unit: string; // Denormalized
+  createdAt: any; // Timestamp
   updatedAt: any; // Timestamp
-  // `branchId` and `ingredientId` are implicit from path
 }
 
 export interface StockMovement { // Represents items in /branches/{branchId}/stockMovements/{movementId}
   id: string; // Document ID
-  ingredientId: string; // Reference to Ingredient
+  ingredient: DenormalizedIngredientRef; // Reference to Ingredient
   quantity: number; // Positive for IN, negative for OUT
   type: 'purchase_in' | 'sale_out' | 'adjustment' | 'spoilage_out' | 'transfer_in' | 'transfer_out' | string;
   source?: string; // e.g., orderId, purchaseOrderId, reason for adjustment
   createdAt: any; // Timestamp
-  userId?: string; // User who performed/recorded
-  // `branchId` is implicit from path
+  updatedAt: any; // Timestamp
+  user?: DenormalizedUserRef; // User who performed/recorded
+  branch: DenormalizedBranchRef; // Thêm reference tới branch
 }
 
 // 6. Báo cáo & Thông báo
 export interface ShiftReport { // Represents items in /branches/{branchId}/shiftReports/{reportId}
   id: string; // Document ID
-  userId: string; // Staff member ID
-  username: string; // Denormalized staff member name
+  user: DenormalizedUserRef; // Staff member ID và username
   startTime: any; // Timestamp
   endTime?: any; // Timestamp
   status: 'active' | 'closed' | string;
@@ -239,8 +270,12 @@ export interface ShiftReport { // Represents items in /branches/{branchId}/shift
   totalQrIn?: number; // Aggregated
   totalTransactions?: number; // Aggregated
   notes?: string;
-  createdAt?: any; // Timestamp
-  // `branchId` is implicit from path
+  createdAt: any; // Timestamp
+  updatedAt: any; // Timestamp
+  branch: DenormalizedBranchRef; // Thêm reference tới branch
+  // Old fields for compatibility if needed, to be phased out:
+  userId?: string;
+  username?: string;
 }
 
 export interface Notification { // Represents items in /notifications/{notificationId}
@@ -248,10 +283,11 @@ export interface Notification { // Represents items in /notifications/{notificat
   type: 'low_stock_warning' | 'new_promotion' | string;
   message: string;
   status: 'unread' | 'read' | string;
-  branchId?: string; // Optional, if notification is branch-specific
-  tenantId?: string; // Optional, if notification is tenant-specific
+  branch?: DenormalizedBranchRef; // Optional, if notification is branch-specific
+  tenant?: DenormalizedTenantRef; // Optional, if notification is tenant-specific
   targetUserIds?: string[]; // Specific users to notify
   createdAt: any; // Timestamp
+  updatedAt: any; // Timestamp
   relatedEntity?: { type: string, id: string }; // e.g. { type: "ingredient", id: "ing123" }
 }
 
@@ -266,3 +302,28 @@ export interface PredictedSale {
   date: string; // YYYY-MM-DD
   predictedSales: number;
 }
+
+// Type used in UI for order items before saving (might be slightly different from persisted OrderItem)
+// This is an example, you might need to adjust based on UI needs
+export interface CartItem extends MenuItem {
+    cartItemId: string; // Unique ID for the item *in the cart*
+    quantity: number; // Quantity of this item in the cart
+    // notes?: string; // If item-specific notes are added in cart
+}
+
+// Note: Payment collection was mentioned in review but not in the final types provided.
+// If you have a top-level `payments` collection, its type definition would go here.
+// Example:
+// export interface Payment {
+//   id: string;
+//   order: DenormalizedOrderRef;
+//   branch?: DenormalizedBranchRef;
+//   tenant?: DenormalizedTenantRef;
+//   amount: number;
+//   method: string; // e.g., 'cash', 'card', 'qr_code_vnpay'
+//   status: 'pending' | 'successful' | 'failed' | string;
+//   transactionId?: string; // From payment gateway
+//   createdAt: any; // Timestamp
+//   updatedAt: any; // Timestamp
+// }
+

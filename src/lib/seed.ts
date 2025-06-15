@@ -4,6 +4,9 @@
 // 2. Set up your Firebase client config in .env file (NEXT_PUBLIC_FIREBASE_...).
 // 3. Run from the root of your project: `tsx src/lib/seed.ts`
 
+import { config as dotenvConfig } from 'dotenv';
+dotenvConfig(); // Load environment variables from .env file
+
 import { db } from './firebase'; // Ensure this path is correct
 import { collection, doc, setDoc, addDoc, serverTimestamp, writeBatch, Timestamp } from 'firebase/firestore';
 import type { 

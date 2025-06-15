@@ -3,8 +3,8 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { auth } from '@/lib/firebase';
-import type { User as FirebaseUser } from 'firebase/auth';
+import { initializeFirebaseClient, auth as getAuthInstance } from '@/lib/firebase'; // Updated import
+import type { User as FirebaseUser, Auth } from 'firebase/auth'; // Added Auth type
 import {
   SidebarProvider,
   Sidebar,
@@ -38,8 +38,42 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [isLoadingUser, setIsLoadingUser] = useState(true);
+  const [firebaseInitialized, setFirebaseInitialized] = useState(false);
+  const [isLoadingFirebase, setIsLoadingFirebase] = useState(true); // For initial Firebase init
 
   useEffect(() => {
+    // Initialize Firebase client-side
+    try {
+      initializeFirebaseClient();
+      setFirebaseInitialized(true);
+      console.log("AppLayout: Firebase Client Initialized.");
+    } catch (error) {
+      console.error("AppLayout: Error initializing Firebase Client:", error);
+      // Handle initialization error appropriately, maybe show an error message
+    } finally {
+        setIsLoadingFirebase(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!firebaseInitialized) {
+      console.log("AppLayout: Firebase not initialized yet, auth listener waiting.");
+      // setIsLoadingUser can remain true until firebase is initialized and auth state is checked
+      return;
+    }
+
+    const auth = getAuthInstance();
+    if (!auth) {
+        console.error("AppLayout: Auth instance not available after Firebase initialization.");
+        setIsLoadingUser(false); // Stop loading user if auth service fails
+        if (pathname !== '/login' && pathname !== '/register') {
+          router.push('/login?reason=authServiceFailed');
+        }
+        return;
+    }
+
+    console.log("AppLayout: Setting up Firebase Auth listener...");
+    setIsLoadingUser(true); // Start loading user state
     const unsubscribe = auth.onAuthStateChanged((user) => {
       if (user) {
         setCurrentUser(user);
@@ -54,8 +88,6 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             return; 
           }
         } else {
-          // If there's a Firebase user but no loginTimestamp, it implies an old session or manipulation.
-          // Forcing re-login ensures the timestamp is set.
            if (pathname !== '/login' && pathname !== '/register') {
              auth.signOut().then(() => {
                router.push('/login?reason=missingTimestamp');
@@ -73,9 +105,14 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     });
 
     return () => unsubscribe();
-  }, [router, pathname]);
+  }, [firebaseInitialized, router, pathname]); // Depend on firebaseInitialized
 
   useEffect(() => {
+    if (!firebaseInitialized) return; // Wait for Firebase init
+
+    const auth = getAuthInstance();
+    if (!auth) return; // Auth service not ready
+
     const intervalId = setInterval(() => {
       if (auth.currentUser) {
         const loginTimestampStr = localStorage.getItem('loginTimestamp');
@@ -92,9 +129,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     }, 60 * 1000); // Check every minute
 
     return () => clearInterval(intervalId);
-  }, [router]);
+  }, [firebaseInitialized, router]); // Depend on firebaseInitialized
 
-  if (isLoadingUser && !pathname.startsWith('/login') && !pathname.startsWith('/register')) {
+  if (isLoadingFirebase || (firebaseInitialized && isLoadingUser && !pathname.startsWith('/login') && !pathname.startsWith('/register'))) {
     return (
       <div className="flex h-screen items-center justify-center bg-background">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -103,11 +140,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // If not loading and no user, and trying to access a protected route,
-  // onAuthStateChanged should have redirected. This is a safeguard.
-  if (!isLoadingUser && !currentUser && !pathname.startsWith('/login') && !pathname.startsWith('/register')) {
-     // This typically means the redirect is in progress or auth state is truly null.
-     // Returning null or a minimal loader can prevent flashing protected content.
+  if (firebaseInitialized && !isLoadingUser && !currentUser && !pathname.startsWith('/login') && !pathname.startsWith('/register')) {
     return (
         <div className="flex h-screen items-center justify-center bg-background">
              <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -116,9 +149,23 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     );
   }
   
-  // Allow login/register pages to render without full AppLayout if no user
   if (!currentUser && (pathname.startsWith('/login') || pathname.startsWith('/register'))) {
     return <>{children}</>;
+  }
+
+  // If after all loading, there's still no current user, and we are not on login/register,
+  // this state might be brief before redirection, or indicate an issue.
+  // For safety, we can prevent rendering the full layout if currentUser is null.
+  if (!currentUser) {
+    // This case should ideally be covered by the redirection logic above.
+    // If it's reached, it means redirection hasn't happened yet.
+    // Showing a loader is safer than potentially rendering protected content or a broken layout.
+    return (
+        <div className="flex h-screen items-center justify-center bg-background">
+             <Loader2 className="h-12 w-12 animate-spin text-primary" />
+             <p className="ml-4 text-lg text-foreground">Verifying session...</p>
+        </div>
+    );
   }
 
 
@@ -166,21 +213,42 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
 function UserMenu({ user }: { user: FirebaseUser | null }) {
   const router = useRouter();
+  const [firebaseInitialized, setFirebaseInitialized] = useState(false);
+
+  useEffect(() => {
+    // UserMenu might not strictly need to init Firebase if AppLayout does,
+    // but defensive initialization doesn't hurt, or it can rely on AppLayout's init.
+    // For simplicity, let's assume AppLayout handles the primary initialization.
+    // If UserMenu were used standalone, it would need its own init logic.
+    const authInstance = getAuthInstance(); // Check if already available
+    if(authInstance) setFirebaseInitialized(true);
+    else {
+        // This case implies UserMenu is used where AppLayout hasn't initialized Firebase,
+        // which shouldn't happen in the current setup.
+        console.warn("UserMenu: Auth instance not ready, logout might not work if Firebase not initialized by parent.");
+    }
+  }, []);
+
 
   const handleLogout = () => {
-    auth.signOut().then(() => {
-      try {
-        localStorage.removeItem('loginTimestamp');
-      } catch (e) {
-        console.warn('localStorage not available during logout.');
-      }
-      router.push('/login');
-    });
+    const auth = getAuthInstance();
+    if (auth) {
+      auth.signOut().then(() => {
+        try {
+          localStorage.removeItem('loginTimestamp');
+        } catch (e) {
+          console.warn('localStorage not available during logout.');
+        }
+        router.push('/login');
+      });
+    } else {
+        console.error("UserMenu: Auth service not available for logout. Firebase might not be initialized.");
+        // Fallback or error display
+        router.push('/login?reason=logoutFailed');
+    }
   };
 
   if (!user) {
-    // This case should ideally not be hit if AppLayout correctly gates content,
-    // but as a fallback, provide a sign-in button or nothing.
     return (
       <Button variant="ghost" onClick={() => router.push('/login')}>
         Sign In
@@ -195,7 +263,7 @@ function UserMenu({ user }: { user: FirebaseUser | null }) {
           <Avatar className="h-9 w-9">
             <AvatarImage src={user.photoURL || "https://placehold.co/100x100.png"} alt={user.displayName || "User Avatar"} data-ai-hint="user avatar" />
             <AvatarFallback>
-              {user.displayName ? user.displayName.charAt(0).toUpperCase() : <UserCircle />}
+              {user.displayName ? user.displayName.charAt(0).toUpperCase() : <UserCircle className="h-5 w-5" />}
             </AvatarFallback>
           </Avatar>
         </Button>
@@ -231,3 +299,4 @@ function UserMenu({ user }: { user: FirebaseUser | null }) {
     </DropdownMenu>
   );
 }
+

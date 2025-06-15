@@ -137,7 +137,7 @@ export default function MenuPage() {
              unit: item.unit 
           },
           quantity,
-          note,
+          note: notes,
         };
         return [...prevItems, newOrderItem];
       }
@@ -282,5 +282,3 @@ export default function MenuPage() {
     </div>
   );
 }
-
-    

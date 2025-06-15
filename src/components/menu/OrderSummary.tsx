@@ -1,7 +1,8 @@
+
 'use client';
 
-import * as React from 'react'; // Added React import
-import type { OrderItem } from '@/lib/types';
+import * as React from 'react'; 
+import type { OrderItem as NewOrderItemType } from '@/lib/types'; // Updated type name to match usage
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -12,15 +13,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 
 
 interface OrderSummaryProps {
-  items: OrderItem[];
+  items: NewOrderItemType[];
   onRemoveItem: (itemId: string) => void;
   onClearOrder: () => void;
   onCheckout: (paymentMethod: string) => void;
 }
 
 export function OrderSummary({ items, onRemoveItem, onClearOrder, onCheckout }: OrderSummaryProps) {
-  const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  const taxRate = 0.08; // Example tax rate
+  // Use menuItem.price from the denormalized reference
+  const subtotal = items.reduce((sum, item) => sum + (item.menuItem?.price || 0) * item.quantity, 0);
+  const taxRate = 0.08; 
   const tax = subtotal * taxRate;
   const total = subtotal + tax;
   const [paymentMethod, setPaymentMethod] = React.useState<string | undefined>(PAYMENT_METHODS[0]?.id);
@@ -41,11 +43,12 @@ export function OrderSummary({ items, onRemoveItem, onClearOrder, onCheckout }: 
               {items.map((item) => (
                 <li key={item.id} className="flex items-center justify-between">
                   <div>
-                    <p className="font-medium">{item.name} <span className="text-xs text-muted-foreground">x{item.quantity}</span></p>
-                    <p className="text-sm text-muted-foreground">${item.price.toFixed(2)} each</p>
+                    {/* Use menuItem.name and menuItem.price */}
+                    <p className="font-medium">{item.menuItem?.name || 'Unknown Item'} <span className="text-xs text-muted-foreground">x{item.quantity}</span></p>
+                    <p className="text-sm text-muted-foreground">${(item.menuItem?.price || 0).toFixed(2)} each</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <p className="font-semibold">${(item.price * item.quantity).toFixed(2)}</p>
+                    <p className="font-semibold">${((item.menuItem?.price || 0) * item.quantity).toFixed(2)}</p>
                     <Button variant="ghost" size="icon" onClick={() => onRemoveItem(item.id)} aria-label="Remove item">
                       <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>
@@ -116,3 +119,5 @@ export function OrderSummary({ items, onRemoveItem, onClearOrder, onCheckout }: 
     </Card>
   );
 }
+
+    

@@ -3,13 +3,14 @@
 
 import React, { useState, useEffect } from 'react';
 import { TableCard } from '@/components/tables/TableCard';
-import type { CafeTable as TableType } from '@/lib/types'; // Updated type name
+import type { CafeTable as TableType } from '@/lib/types';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from '@/components/ui/input';
 import { Search, PlusCircle, Loader2, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from "@/hooks/use-toast";
-import { db } from '@/lib/firebase';
+import { initializeFirebaseClient, db as getDbInstance } from '@/lib/firebase'; // Updated import
+import type { Firestore } from 'firebase/firestore';
 import { collection, query, onSnapshot, orderBy } from 'firebase/firestore';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
@@ -21,8 +22,22 @@ export default function TablesPage() {
   const { toast } = useToast();
 
   const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
+  const [firebaseInitialized, setFirebaseInitialized] = useState(false);
 
   useEffect(() => {
+    try {
+      initializeFirebaseClient();
+      setFirebaseInitialized(true);
+    } catch (e) {
+      console.error("Error initializing Firebase in TablesPage:", e);
+      setTablesError("Failed to initialize core services. Please refresh.");
+      setIsLoadingTables(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!firebaseInitialized) return;
+
     const storedBranchId = localStorage.getItem('selectedBranchId');
     if (storedBranchId) {
       setSelectedBranchId(storedBranchId);
@@ -30,22 +45,41 @@ export default function TablesPage() {
       setTablesError("Branch ID not found. Please select a branch first from the main page.");
       setIsLoadingTables(false);
     }
-  }, []);
+  }, [firebaseInitialized]);
 
   useEffect(() => {
-    if (!selectedBranchId) return;
+    if (!selectedBranchId || !firebaseInitialized) {
+      if(firebaseInitialized && !selectedBranchId && !localStorage.getItem('selectedBranchId')) {
+        setTablesError("Branch ID not available for table loading.");
+      }
+      setIsLoadingTables(false);
+      return;
+    }
+
+    const db = getDbInstance();
+    if (!db) {
+      setTablesError("Database service not available.");
+      setIsLoadingTables(false);
+      return;
+    }
 
     setIsLoadingTables(true);
     setTablesError(null);
 
     const tablesCollectionRef = collection(db, "branches", selectedBranchId, "tables");
-    const tablesQuery = query(tablesCollectionRef, orderBy("tableNumber")); // Example ordering
+    const tablesQuery = query(tablesCollectionRef, orderBy("tableNumber"));
 
     const unsubscribe = onSnapshot(tablesQuery, (snapshot) => {
-      const fetchedTables: TableType[] = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      } as TableType));
+      const fetchedTables: TableType[] = snapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+          // Ensure branch ref is correctly typed if TableCard expects it
+          // This should already be part of table doc as per schema
+          branch: data.branch || { id: selectedBranchId, name: 'Unknown Branch'},
+        } as TableType;
+      });
       setTables(fetchedTables);
       setIsLoadingTables(false);
     }, (error) => {
@@ -55,12 +89,11 @@ export default function TablesPage() {
     });
 
     return () => unsubscribe();
-  }, [selectedBranchId]);
+  }, [selectedBranchId, firebaseInitialized]);
 
   const handleSelectTable = (tableId: string) => {
     const table = tables.find(t => t.id === tableId);
     toast({ title: `Table ${table?.tableNumber} Selected`, description: `Status: ${table?.status}` });
-    // Navigate to order page or show details modal: router.push(`/dashboard/order?tableId=${tableId}`)
   };
 
   const areas = Array.from(new Set(tables.map(table => table.zone || 'Default Area'))).sort();
@@ -71,7 +104,7 @@ export default function TablesPage() {
     table.status.toLowerCase().includes(searchTerm.toLowerCase())
   );
   
-  if (isLoadingTables) {
+  if (!firebaseInitialized || (isLoadingTables && !tablesError && selectedBranchId)) {
     return (
       <div className="flex justify-center items-center h-full">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -110,9 +143,10 @@ export default function TablesPage() {
         </Button>
       </div>
       
-      {tables.length === 0 && !isLoadingTables ? (
+      {tables.length === 0 && !isLoadingTables && firebaseInitialized ? (
          <div className="text-center py-10">
             <p className="text-xl text-muted-foreground">No tables found for this branch.</p>
+            {!selectedBranchId && <p className="text-sm text-muted-foreground mt-2">Please ensure a branch is selected.</p>}
           </div>
       ) : (
         <Tabs defaultValue={areas[0] || 'all'} className="flex-grow flex flex-col">
@@ -121,6 +155,7 @@ export default function TablesPage() {
             {areas.map(area => (
               <TabsTrigger key={area} value={area}>{area}</TabsTrigger>
             ))}
+             {areas.length === 0 && <TabsTrigger value="all" disabled>All Areas</TabsTrigger>}
           </TabsList>
           
           <div className="flex-grow overflow-auto pr-2">
@@ -151,3 +186,5 @@ export default function TablesPage() {
     </div>
   );
 }
+
+    

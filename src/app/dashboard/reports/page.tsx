@@ -7,7 +7,8 @@ import type { ShiftReport as ShiftReportType } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { DatePickerWithRange } from '@/components/ui/date-range-picker';
 import { Download, Loader2, AlertTriangle } from 'lucide-react';
-import { db } from '@/lib/firebase';
+import { initializeFirebaseClient, db as getDbInstance } from '@/lib/firebase'; // Updated import
+import type { Firestore } from 'firebase/firestore';
 import { collection, query, onSnapshot, orderBy, where, Timestamp } from 'firebase/firestore';
 import type { DateRange } from 'react-day-picker';
 import { subDays } from 'date-fns';
@@ -23,8 +24,22 @@ export default function ReportsPage() {
   });
 
   const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
+  const [firebaseInitialized, setFirebaseInitialized] = useState(false);
 
   useEffect(() => {
+    try {
+      initializeFirebaseClient();
+      setFirebaseInitialized(true);
+    } catch (e) {
+      console.error("Error initializing Firebase in ReportsPage:", e);
+      setReportsError("Failed to initialize core services. Please refresh.");
+      setIsLoadingReports(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!firebaseInitialized) return;
+
     const storedBranchId = localStorage.getItem('selectedBranchId');
     if (storedBranchId) {
       setSelectedBranchId(storedBranchId);
@@ -32,22 +47,34 @@ export default function ReportsPage() {
       setReportsError("Branch ID not found. Please select a branch first.");
       setIsLoadingReports(false);
     }
-  }, []);
+  }, [firebaseInitialized]);
 
   useEffect(() => {
-    if (!selectedBranchId || !dateRange?.from || !dateRange?.to) return;
+    if (!selectedBranchId || !dateRange?.from || !dateRange?.to || !firebaseInitialized) {
+      if(firebaseInitialized && !selectedBranchId && !localStorage.getItem('selectedBranchId')) {
+        setReportsError("Branch ID not available for report loading.");
+      }
+      setIsLoadingReports(false);
+      return;
+    }
+    
+    const db = getDbInstance();
+    if (!db) {
+      setReportsError("Database service not available.");
+      setIsLoadingReports(false);
+      return;
+    }
 
     setIsLoadingReports(true);
     setReportsError(null);
 
     const reportsCollectionRef = collection(db, "branches", selectedBranchId, "shiftReports");
-    // Ensure dates are Firestore Timestamps for querying
     const startTimeStamp = Timestamp.fromDate(dateRange.from);
-    const endTimeStamp = Timestamp.fromDate(new Date(dateRange.to.setHours(23, 59, 59, 999))); // End of selected day
+    const endTimeStamp = Timestamp.fromDate(new Date(dateRange.to.setHours(23, 59, 59, 999)));
 
     const reportsQuery = query(
       reportsCollectionRef,
-      orderBy("startTime", "desc"), // Show newest reports first
+      orderBy("startTime", "desc"),
       where("startTime", ">=", startTimeStamp),
       where("startTime", "<=", endTimeStamp)
     );
@@ -60,6 +87,10 @@ export default function ReportsPage() {
           ...data,
           startTime: data.startTime?.toDate ? data.startTime.toDate() : new Date(),
           endTime: data.endTime?.toDate ? data.endTime.toDate() : undefined,
+          // Ensure branch and user refs are correctly typed if ShiftReportCard expects them
+          // These should already be part of the shift report doc as per schema
+          branch: data.branch || { id: selectedBranchId, name: 'Unknown Branch'},
+          user: data.user || { id: '', username: 'Unknown User' }
         } as ShiftReportType;
       });
       setReports(fetchedReports);
@@ -71,10 +102,10 @@ export default function ReportsPage() {
     });
 
     return () => unsubscribe();
-  }, [selectedBranchId, dateRange]);
+  }, [selectedBranchId, dateRange, firebaseInitialized]);
 
 
-  if (isLoadingReports) {
+  if (!firebaseInitialized || (isLoadingReports && !reportsError && selectedBranchId)) {
     return (
       <div className="flex justify-center items-center h-full">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -102,7 +133,7 @@ export default function ReportsPage() {
         <div className="flex gap-2 items-center">
            <DatePickerWithRange 
             initialDateRange={dateRange}
-            onUpdate={(range) => setDateRange(range)} // Assuming DatePickerWithRange has onUpdate prop
+            onUpdate={(range) => setDateRange(range)}
           />
           <Button variant="outline">
             <Download className="mr-2 h-4 w-4" /> Export
@@ -110,7 +141,7 @@ export default function ReportsPage() {
         </div>
       </div>
       
-      {reports.length === 0 ? (
+      {reports.length === 0 && firebaseInitialized ? (
         <p className="text-muted-foreground text-center py-8">No reports available for the selected period.</p>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -123,5 +154,4 @@ export default function ReportsPage() {
   );
 }
 
-// Ensure DatePickerWithRange component is updated to accept onUpdate or similar prop
-// For now, I'll update the component signature in its file.
+    

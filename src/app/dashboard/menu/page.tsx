@@ -4,13 +4,14 @@
 import React, { useState, useEffect } from 'react';
 import { MenuItemCard } from '@/components/menu/MenuItemCard';
 import { OrderSummary } from '@/components/menu/OrderSummary';
-import type { Menu, MenuItem as NewMenuItemType, CartItem, OrderItem as NewOrderItemType } from '@/lib/types';
+import type { Menu, MenuItem as NewMenuItemType, OrderItem as NewOrderItemType } from '@/lib/types';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Search, Loader2, AlertTriangle } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
-import { db } from '@/lib/firebase';
-import { collection, query, where, onSnapshot, getDocs, doc, collectionGroup } from 'firebase/firestore';
+import { initializeFirebaseClient, db as getDbInstance } from '@/lib/firebase'; // Updated import
+import type { Firestore } from 'firebase/firestore';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 export default function MenuPage() {
@@ -22,11 +23,23 @@ export default function MenuPage() {
   const [menuError, setMenuError] = useState<string | null>(null);
   const { toast } = useToast();
 
-  // Assume selectedTenantId is stored in localStorage after tenant/branch selection
-  // In a real app, this might come from context or a global state manager
   const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
+  const [firebaseInitialized, setFirebaseInitialized] = useState(false);
 
   useEffect(() => {
+    try {
+      initializeFirebaseClient();
+      setFirebaseInitialized(true);
+    } catch (e) {
+      console.error("Error initializing Firebase in MenuPage:", e);
+      setMenuError("Failed to initialize core services. Please refresh.");
+      setIsLoadingMenu(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!firebaseInitialized) return;
+
     const storedTenantId = localStorage.getItem('selectedTenantId');
     if (storedTenantId) {
       setSelectedTenantId(storedTenantId);
@@ -34,15 +47,28 @@ export default function MenuPage() {
       setMenuError("Tenant ID not found. Please select a tenant first.");
       setIsLoadingMenu(false);
     }
-  }, []);
+  }, [firebaseInitialized]);
 
   useEffect(() => {
-    if (!selectedTenantId) return;
+    if (!selectedTenantId || !firebaseInitialized) {
+      if(firebaseInitialized && !selectedTenantId && !localStorage.getItem('selectedTenantId')) {
+         // Only set error if firebase is init and tenantId is confirmed missing
+         setMenuError("Tenant ID not available for menu loading.");
+      }
+      setIsLoadingMenu(false);
+      return;
+    }
+
+    const db = getDbInstance();
+    if (!db) {
+      setMenuError("Database service not available.");
+      setIsLoadingMenu(false);
+      return;
+    }
 
     setIsLoadingMenu(true);
     setMenuError(null);
 
-    // Fetch active menu for the tenant
     const menusQuery = query(
       collection(db, "menus"),
       where("tenant.id", "==", selectedTenantId),
@@ -58,16 +84,18 @@ export default function MenuPage() {
         return;
       }
       
-      const menuDoc = snapshot.docs[0]; // Assuming only one active menu per tenant for now
+      const menuDoc = snapshot.docs[0];
       const menuData = { id: menuDoc.id, ...menuDoc.data() } as Menu;
       setActiveMenu(menuData);
 
-      // Fetch items for this active menu
       const itemsCollectionRef = collection(db, "menus", menuDoc.id, "items");
       const unsubscribeItems = onSnapshot(itemsCollectionRef, (itemsSnapshot) => {
         const fetchedItems: NewMenuItemType[] = itemsSnapshot.docs.map(itemDoc => ({
           id: itemDoc.id,
-          ...itemDoc.data()
+          ...itemDoc.data(),
+          // Ensure denormalized menu ref is present if your MenuItemCard expects it
+          // This might already be handled if your 'items' subcollection documents store this
+          menu: menuData ? { id: menuData.id, name: menuData.name } : { id: '', name: ''}
         } as NewMenuItemType));
         setMenuItems(fetchedItems);
         setIsLoadingMenu(false);
@@ -76,7 +104,7 @@ export default function MenuPage() {
         setMenuError("Failed to load menu items.");
         setIsLoadingMenu(false);
       });
-      return () => unsubscribeItems(); // Cleanup items listener
+      return () => unsubscribeItems();
 
     }, (error) => {
       console.error("Error fetching active menu:", error);
@@ -86,26 +114,28 @@ export default function MenuPage() {
       setIsLoadingMenu(false);
     });
 
-    return () => unsubscribeMenu(); // Cleanup menu listener
-  }, [selectedTenantId]);
+    return () => unsubscribeMenu();
+  }, [selectedTenantId, firebaseInitialized]);
 
   const handleAddToCart = (item: NewMenuItemType, quantity: number, notes?: string) => {
     setOrderItems((prevItems) => {
-      const existingItemIndex = prevItems.findIndex((oi) => oi.menuItemId === item.id); // Check against menuItemId
+      const existingItemIndex = prevItems.findIndex((oi) => oi.menuItem?.id === item.id);
       if (quantity <= 0) {
-        return prevItems.filter((oi) => oi.menuItemId !== item.id);
+        return prevItems.filter((oi) => oi.menuItem?.id !== item.id);
       }
       if (existingItemIndex > -1) {
         const updatedItems = [...prevItems];
         updatedItems[existingItemIndex] = { ...updatedItems[existingItemIndex], quantity, note: notes || updatedItems[existingItemIndex].note };
         return updatedItems;
       } else {
-        // Create a new OrderItem
         const newOrderItem: NewOrderItemType = {
-          id: `${item.id}-${Date.now()}`, // Temporary local ID for the order item
-          menuItemId: item.id,
-          menuItemName: item.name,
-          unitPrice: item.price,
+          id: `${item.id}-${Date.now()}`, 
+          menuItem: { // Denormalized reference
+             id: item.id, 
+             name: item.name, 
+             price: item.price, 
+             unit: item.unit 
+          },
           quantity,
           note,
         };
@@ -114,7 +144,7 @@ export default function MenuPage() {
     });
   };
   
-  const handleRemoveItem = (orderItemId: string) => { // orderItemId is the persisted OrderItem.id
+  const handleRemoveItem = (orderItemId: string) => {
     setOrderItems((prevItems) => prevItems.filter((item) => item.id !== orderItemId));
   };
 
@@ -128,9 +158,8 @@ export default function MenuPage() {
       toast({ title: "Empty Order", description: "Cannot checkout an empty order.", variant: "destructive" });
       return;
     }
-    // In a real app, this would persist the order to Firestore /branches/{branchId}/orders/{orderId}
     console.log('Checking out with:', paymentMethod, orderItems);
-    const orderTotalWithTax = orderItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0) * 1.08; // Assuming 8% tax
+    const orderTotalWithTax = orderItems.reduce((sum, item) => sum + (item.menuItem?.price || 0) * item.quantity, 0) * 1.08; 
     toast({ 
         title: "Checkout Successful!", 
         description: `Paid with ${paymentMethod}. Order total: $${orderTotalWithTax.toFixed(2)}`
@@ -141,12 +170,12 @@ export default function MenuPage() {
   const categories = Array.from(new Set(menuItems.map(item => item.category))).sort();
   
   const filteredMenuItems = menuItems.filter(item => 
-    item.available && // Only show available items
+    item.available && 
     (item.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
     item.category.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
-  if (isLoadingMenu) {
+  if (!firebaseInitialized || (isLoadingMenu && !menuError && selectedTenantId)) {
     return (
       <div className="flex justify-center items-center h-full">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -172,6 +201,7 @@ export default function MenuPage() {
       <div className="flex flex-col justify-center items-center h-full">
         <AlertTriangle className="h-12 w-12 text-muted-foreground mb-4" />
         <p className="text-xl text-muted-foreground">No menu items available for the selected tenant.</p>
+         {!selectedTenantId && <p className="text-sm text-muted-foreground mt-2">Please ensure a tenant is selected.</p>}
       </div>
     );
   }
@@ -197,6 +227,7 @@ export default function MenuPage() {
             {categories.map(category => (
               <TabsTrigger key={category} value={category}>{category}</TabsTrigger>
             ))}
+             {categories.length === 0 && <TabsTrigger value="all" disabled>All</TabsTrigger>}
           </TabsList>
           
           <div className="flex-grow overflow-auto pr-2">
@@ -204,7 +235,7 @@ export default function MenuPage() {
               <TabsContent key={category} value={category} className="mt-0">
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                   {filteredMenuItems.filter(item => item.category === category).map((item) => {
-                    const orderItemInstance = orderItems.find(oi => oi.menuItemId === item.id);
+                    const orderItemInstance = orderItems.find(oi => oi.menuItem?.id === item.id);
                     return (
                       <MenuItemCard 
                         key={item.id} 
@@ -217,11 +248,10 @@ export default function MenuPage() {
                 </div>
               </TabsContent>
             ))}
-            {/* Fallback for "all" or if no category selected / searchTerm active */}
              <TabsContent value="all"> 
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                   {filteredMenuItems.map((item) => {
-                     const orderItemInstance = orderItems.find(oi => oi.menuItemId === item.id);
+                     const orderItemInstance = orderItems.find(oi => oi.menuItem?.id === item.id);
                     return (
                        <MenuItemCard 
                         key={item.id} 
@@ -252,3 +282,5 @@ export default function MenuPage() {
     </div>
   );
 }
+
+    

@@ -5,14 +5,18 @@
 // 3. Run from the root of your project: `tsx src/lib/seed.ts`
 
 import { config as dotenvConfig } from 'dotenv';
-dotenvConfig(); // Load environment variables from .env file
+import path from 'path'; // Import the 'path' module
+
+// Explicitly load .env file from the project root
+dotenvConfig({ path: path.resolve(process.cwd(), '.env') });
+
 
 import { db } from './firebase'; // Ensure this path is correct
 import { collection, doc, setDoc, addDoc, serverTimestamp, writeBatch, Timestamp } from 'firebase/firestore';
 import type { 
     Tenant, Branch, User, Menu, MenuItem, CafeTable, Promotion, Customer, 
     Order, OrderItem, QRPaymentRequest, Ingredient, BranchInventoryItem, 
-    StockMovement, ShiftReport, Notification, DenormalizedTenantRef, DenormalizedBranchRef 
+    StockMovement, ShiftReport, Notification 
 } from './types'; // Ensure this path is correct
 
 const tenantsData: Omit<Tenant, 'id' | 'createdAt' | 'updatedAt'>[] = [
@@ -21,7 +25,7 @@ const tenantsData: Omit<Tenant, 'id' | 'createdAt' | 'updatedAt'>[] = [
     { name: 'Aroma Mocha Group', subscriptionPlan: 'enterprise' },
 ];
 
-const ingredientsData: Omit<Ingredient, 'id' | 'tenantId' | 'createdAt' | 'updatedAt'>[] = [
+const ingredientsData: Omit<Ingredient, 'id' | 'tenant' | 'createdAt' | 'updatedAt'>[] = [
     { name: 'Coffee Beans - Arabica', unit: 'gram', lowStockThreshold: 1000, category: 'Coffee Supplies', description: 'High quality Arabica beans' },
     { name: 'Full Cream Milk', unit: 'ml', lowStockThreshold: 5000, category: 'Dairy', description: 'Fresh full cream milk' },
     { name: 'Sugar Syrup', unit: 'ml', lowStockThreshold: 1000, category: 'Sweeteners', description: 'Standard sugar syrup' },
@@ -49,21 +53,22 @@ async function seedDatabase() {
         }
 
         // --- Seed Ingredients (associated with first tenant for example) ---
+        const ingredientRefsByName: { [key: string]: string } = {}; // To store ingredientId by name
+
         if (tenantDocs.length > 0) {
             const firstTenantId = tenantDocs[0].id;
-            const ingredientRefs: { [key: string]: string } = {}; // To store ingredientId by name
-
+            
             for (const ingData of ingredientsData) {
                 const ingredientRef = doc(collection(db, 'ingredients'));
                  const ingredientFullData: Ingredient = { 
                     id: ingredientRef.id, 
                     ...ingData, 
-                    tenantId: firstTenantId,
+                    tenant: { id: firstTenantId }, // Reference tenant
                     createdAt: serverTimestamp() as Timestamp, 
                     updatedAt: serverTimestamp() as Timestamp 
                 };
                 batch.set(ingredientRef, ingredientFullData);
-                ingredientRefs[ingData.name] = ingredientRef.id;
+                ingredientRefsByName[ingData.name] = ingredientRef.id;
                 console.log(`Prepared ingredient: ${ingData.name} for tenant ${firstTenantId}`);
             }
         
@@ -87,17 +92,15 @@ async function seedDatabase() {
 
                     // --- Seed Users (for this branch) ---
                     const usersForBranch = [
-                        { email: `admin-${tenantDoc.id.substring(0,4)}-${branchRef.id.substring(0,4)}@example.com`, username: `Admin ${branchData.name.split(" ")[0]}`, role: 'admin', active: true },
-                        { email: `manager-${tenantDoc.id.substring(0,4)}-${branchRef.id.substring(0,4)}@example.com`, username: `Manager ${branchData.name.split(" ")[0]}`, role: 'manager', active: true },
-                        { email: `cashier-${tenantDoc.id.substring(0,4)}-${branchRef.id.substring(0,4)}@example.com`, username: `Cashier ${branchData.name.split(" ")[0]}`, role: 'cashier', active: true },
+                        { email: `admin-${tenantDoc.id.substring(0,4)}-${branchRef.id.substring(0,4)}@example.com`, username: `Admin ${branchData.name.split(" ")[0]}`, role: 'admin', active: true, hashedPinCode: 'hashedpin123' },
+                        { email: `manager-${tenantDoc.id.substring(0,4)}-${branchRef.id.substring(0,4)}@example.com`, username: `Manager ${branchData.name.split(" ")[0]}`, role: 'manager', active: true, hashedPinCode: 'hashedpin456' },
+                        { email: `cashier-${tenantDoc.id.substring(0,4)}-${branchRef.id.substring(0,4)}@example.com`, username: `Cashier ${branchData.name.split(" ")[0]}`, role: 'cashier', active: true, hashedPinCode: 'hashedpin789' },
                     ];
                     for (const userData of usersForBranch) {
-                        // In a real scenario, Firebase UID would come from Auth. For seeding, we use a placeholder or skip.
-                        // This seed script doesn't create Firebase Auth users.
-                        const userRef = doc(collection(db, 'users')); // Or use email as doc ID if unique and desired
+                        const userRef = doc(collection(db, 'users'));
                         const userFullData: User = {
-                            id: userRef.id,
-                            firebaseUid: `seed-uid-${userRef.id}`, // Placeholder
+                            id: userRef.id, // Firestore doc ID
+                            firebaseUid: `seed-fbuid-${userRef.id}`, // Placeholder Firebase Auth UID
                             ...userData,
                             tenant: { id: tenantDoc.id },
                             branch: { id: branchRef.id, name: branchFullData.name },
@@ -116,18 +119,20 @@ async function seedDatabase() {
                     ];
                     for (const tableData of tablesForBranch) {
                         const tableRef = doc(collection(db, 'branches', branchRef.id, 'tables'));
-                        batch.set(tableRef, {id: tableRef.id, ...tableData});
+                        batch.set(tableRef, {id: tableRef.id, ...tableData}); // Add id to the document data as well
                         console.log(`Prepared table: ${tableData.tableNumber} for branch ${branchData.name}`);
                     }
+
                      // --- Seed Inventory (for this branch, using ingredients of the first tenant) ---
-                     if (tenantDoc.id === firstTenantId) { // Only seed inventory for branches of the first tenant that has ingredients
-                        for(const ingName in ingredientRefs) {
-                            const ingId = ingredientRefs[ingName];
-                            const inventoryRef = doc(db, 'branches', branchRef.id, 'inventory', ingId); // Doc ID is ingredientId
+                     if (tenantDoc.id === firstTenantId) { 
+                        for(const ingName in ingredientRefsByName) {
+                            const ingId = ingredientRefsByName[ingName];
+                            const inventoryRef = doc(db, 'branches', branchRef.id, 'inventory', ingId);
+                            const ingDetails = ingredientsData.find(i => i.name === ingName);
                             const invData: Omit<BranchInventoryItem, 'updatedAt'> = {
-                                currentQuantity: Math.floor(Math.random() * 1000) + 50, // Random quantity
+                                currentQuantity: Math.floor(Math.random() * ( (ingDetails?.lowStockThreshold || 50) * 3)) + (ingDetails?.lowStockThreshold || 50) ,
                                 ingredientName: ingName,
-                                unit: ingredientsData.find(i => i.name === ingName)?.unit || 'unit',
+                                unit: ingDetails?.unit || 'unit',
                             };
                             batch.set(inventoryRef, {...invData, updatedAt: serverTimestamp() as Timestamp });
                             console.log(`Prepared inventory for ${ingName} at branch ${branchData.name}`);
@@ -161,14 +166,20 @@ async function seedDatabase() {
             ];
             for (const itemData of menuItemsData) {
                 const itemRef = doc(collection(db, 'menus', menuRef.id, 'items'));
-                batch.set(itemRef, {id: itemRef.id, ...itemData});
+                batch.set(itemRef, {id: itemRef.id, ...itemData}); // Add id to document data
                 console.log(`Prepared menu item: ${itemData.name} for menu ${menuData.name}`);
-                // Seed Recipe (Example for Espresso)
-                // if (itemData.name === 'Espresso' && ingredientRefs['Coffee Beans - Arabica']) {
-                //     const recipeRef = doc(db, 'menus', menuRef.id, 'items', itemRef.id, 'recipe', ingredientRefs['Coffee Beans - Arabica']);
-                //     batch.set(recipeRef, { quantityNeeded: 18, unit: 'gram', ingredientName: 'Coffee Beans - Arabica' });
-                //     console.log(`Prepared recipe for Espresso`);
-                // }
+                
+                // Seed Recipe (Example for Espresso using Coffee Beans - Arabica)
+                if (itemData.name === 'Espresso' && ingredientRefsByName['Coffee Beans - Arabica']) {
+                    const recipeIngredientRef = doc(db, 'menus', menuRef.id, 'items', itemRef.id, 'recipe', ingredientRefsByName['Coffee Beans - Arabica']);
+                    const recipeItemData: Omit<MenuItemRecipeItem, 'id'> = { // id is ingredientId from path
+                        quantityNeeded: 18, 
+                        unit: 'gram', 
+                        ingredientName: 'Coffee Beans - Arabica' 
+                    };
+                    batch.set(recipeIngredientRef, recipeItemData);
+                    console.log(`Prepared recipe for Espresso`);
+                }
             }
         }
 

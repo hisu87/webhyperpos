@@ -11,7 +11,7 @@ import { APP_NAME } from '@/lib/constants';
 import type { Tenant, Branch, User as AppUserType } from '@/lib/types';
 import { Building, Store, ArrowRight, Terminal, Loader2, User as UserIcon } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { initializeFirebaseClient, auth as getAuthInstance, db as getDbInstance } from '@/lib/firebase'; // Updated import
+import { initializeFirebaseClient, auth as getAuthInstance, db as getDbInstance } from '@/lib/firebase';
 import { onAuthStateChanged, type User as FirebaseUser } from 'firebase/auth';
 import { collection, query, where, onSnapshot, doc, Unsubscribe, getDoc, getDocs, limit, DocumentSnapshot, QueryDocumentSnapshot, DocumentData, Firestore } from 'firebase/firestore';
 
@@ -42,7 +42,7 @@ function transformDocToBranch(docSnapshot: DocumentSnapshot<DocumentData> | Quer
     name: data.name || 'Unnamed Branch',
     location: data.location,
     // Ensure data.tenant has both id and name, or provide defaults
-    tenant: data.tenant ? { id: data.tenant.id, name: data.tenant.name || 'Unnamed Tenant Ref' } : { id: '', name: 'N/A' },
+    tenant: (data.tenant && typeof data.tenant.id === 'string' && typeof data.tenant.name === 'string') ? { id: data.tenant.id, name: data.tenant.name } : { id: '', name: 'N/A' },
     createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
     updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate() : new Date(),
   };
@@ -50,7 +50,7 @@ function transformDocToBranch(docSnapshot: DocumentSnapshot<DocumentData> | Quer
 
 interface UserProfileAccessData {
   userTenantId?: string;
-  userTenantName?: string; // Added to hold denormalized tenant name from user profile
+  userTenantName?: string;
   userBranchId?: string;
   userBranchName?: string;
   role?: string;
@@ -82,7 +82,8 @@ export default function TenantBranchSelectionPage() {
     } catch (error) {
         console.error("Tenant/Branch Page: Error initializing Firebase Client:", error);
         setFetchError("Failed to initialize core services. Please refresh.");
-        setIsAuthLoading(false);
+        setIsAuthLoading(false); // Ensure loading stops on init error
+        setFirebaseInitialized(false); // Mark as not initialized
     }
   }, []);
 
@@ -112,24 +113,27 @@ export default function TenantBranchSelectionPage() {
         setBranchesData([]);
         setSelectedTenantId(undefined);
         setSelectedBranchId(undefined);
-        setFetchError("Please log in to select a tenant and branch.");
+        // setFetchError("Please log in to select a tenant and branch."); // Removed to avoid overriding more specific errors
       }
       setIsAuthLoading(false);
     });
     return () => unsubscribeAuth();
   }, [firebaseInitialized]);
 
-  // Effect to fetch user's profile
+  // Effect to fetch user's profile using UID
   useEffect(() => {
-    if (!firebaseInitialized || isAuthLoading || !currentUser || !currentUser.email) {
+    if (!firebaseInitialized || isAuthLoading || !currentUser || !currentUser.uid) {
       setUserProfileAccess(null);
       setIsLoadingUserProfile(false);
+      if(!currentUser && !isAuthLoading && firebaseInitialized) {
+        setFetchError("Please log in to continue.");
+      }
       return;
     }
 
     setIsLoadingUserProfile(true);
     setFetchError(null);
-    console.log("Tenant/Branch Page: Fetching user profile for email:", currentUser.email);
+    console.log("Tenant/Branch Page: Fetching user profile for UID:", currentUser.uid);
 
     const db = getDbInstance();
     if (!db) {
@@ -139,24 +143,16 @@ export default function TenantBranchSelectionPage() {
         return;
     }
 
-    const usersQuery = query(collection(db, "users"), where("email", "==", currentUser.email), limit(1));
+    const userDocRef = doc(db, "users", currentUser.uid);
     
-    const unsubscribeUser = onSnapshot(usersQuery, (querySnapshot) => {
-      if (!querySnapshot.empty) {
-        const userDoc = querySnapshot.docs[0];
-        const userData = userDoc.data() as AppUserType;
-        const userTenant = userData.tenant; // This should be DenormalizedTenantRef { id, name }
-        const userBranch = userData.branch; // This should be DenormalizedBranchRef { id, name }
+    const unsubscribeUser = onSnapshot(userDocRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const userData = docSnap.data() as AppUserType; // Assuming AppUserType correctly reflects your Firestore structure
+        const userTenant = userData.tenant; // Expected: DenormalizedTenantRef { id, name }
+        const userBranch = userData.branch; // Expected: DenormalizedBranchRef { id, name }
 
         console.log("Tenant/Branch Page: User profile found:", { 
-            userId: userDoc.id, 
-            userTenantId: userTenant?.id, 
-            userTenantName: userTenant?.name,
-            userBranchId: userBranch?.id,
-            userBranchName: userBranch?.name, 
-            role: userData.role 
-        });
-        setUserProfileAccess({ 
+            userId: docSnap.id, 
             userTenantId: userTenant?.id, 
             userTenantName: userTenant?.name,
             userBranchId: userBranch?.id,
@@ -164,16 +160,43 @@ export default function TenantBranchSelectionPage() {
             role: userData.role 
         });
 
+        // Validate denormalized refs (basic check)
+        if (userTenant && (typeof userTenant.id !== 'string' || typeof userTenant.name !== 'string')) {
+            console.warn("Tenant/Branch Page: User profile has incomplete tenant reference.", userTenant);
+            setFetchError("User profile has incomplete tenant data. Contact support.");
+             setUserProfileAccess(null);
+        } else if (userBranch && (typeof userBranch.id !== 'string' || typeof userBranch.name !== 'string')) {
+            console.warn("Tenant/Branch Page: User profile has incomplete branch reference.", userBranch);
+             // Allow proceeding if tenant is fine, branch might be optional for some roles or setups
+             setUserProfileAccess({ 
+                userTenantId: userTenant?.id, 
+                userTenantName: userTenant?.name,
+                userBranchId: undefined, // Treat as no specific branch assigned if data is malformed
+                userBranchName: undefined,
+                role: userData.role 
+            });
+        } else {
+            setUserProfileAccess({ 
+                userTenantId: userTenant?.id, 
+                userTenantName: userTenant?.name,
+                userBranchId: userBranch?.id,
+                userBranchName: userBranch?.name, 
+                role: userData.role 
+            });
+        }
+        
         if (!userTenant?.id && userData.role !== 'admin') {
             setFetchError("Your user profile does not have an assigned tenant. Please contact support.");
         }
+
       } else {
-        console.warn("Tenant/Branch Page: No user profile found in 'users' collection for email:", currentUser.email);
+        console.warn("Tenant/Branch Page: No user profile found in 'users' collection for UID:", currentUser.uid);
+        setFetchError(`User profile not found for ID ${currentUser.uid}. Please contact support or check data.`);
         setUserProfileAccess(null);
       }
       setIsLoadingUserProfile(false);
     }, (error) => {
-      console.error("Tenant/Branch Page: Error fetching user profile:", error);
+      console.error("Tenant/Branch Page: Error fetching user profile by UID:", error);
       setFetchError(`Failed to load user access data: ${error.message}.`);
       setUserProfileAccess(null);
       setIsLoadingUserProfile(false);
@@ -191,23 +214,36 @@ export default function TenantBranchSelectionPage() {
   useEffect(() => {
     if (!firebaseInitialized || isAuthLoading || isLoadingUserProfile || !currentUser) {
       if (!currentUser && !isAuthLoading && firebaseInitialized) setFetchError("Please log in to view tenants.");
+      setIsLoadingTenants(false);
+      setTenantsData([]); // Clear tenants if preconditions not met
       return;
     }
     
-    setFetchError(null);
-    setIsLoadingTenants(true);
     let unsubscribeTenants: Unsubscribe | undefined;
-
-    const profileTenantId = userProfileAccess?.userTenantId;
-    const profileRole = userProfileAccess?.role;
     const db = getDbInstance();
 
     if (!db) {
         console.error("Tenant/Branch Page: Firestore instance not available for tenant fetch.");
         setFetchError("Database service failed to load.");
         setIsLoadingTenants(false);
+        setTenantsData([]);
         return;
     }
+
+    // Only proceed if userProfileAccess has been determined (or if it's an admin without pre-assigned tenant)
+    if (!userProfileAccess && currentUser && !isLoadingUserProfile) {
+        // If profile loading is complete but no access data, means profile wasn't found or was invalid
+        // fetchError would have been set by the profile fetching useEffect
+        setIsLoadingTenants(false);
+        setTenantsData([]);
+        return;
+    }
+    
+    setIsLoadingTenants(true);
+    setFetchError(null); // Clear previous errors before new fetch attempt
+
+    const profileTenantId = userProfileAccess?.userTenantId;
+    const profileRole = userProfileAccess?.role;
 
     if (profileTenantId) {
       console.log(`Tenant/Branch Page: Fetching specific tenant '${profileTenantId}' from user's profile.`);
@@ -235,7 +271,8 @@ export default function TenantBranchSelectionPage() {
         if (fetchedTenants.length === 1 && selectedTenantId !== fetchedTenants[0].id) {
             handleTenantChange(fetchedTenants[0].id);
         } else if (selectedTenantId && !fetchedTenants.some(t => t.id === selectedTenantId)) {
-            handleTenantChange(undefined);
+            // If current selectedTenantId is no longer in the list (e.g. admin changed selection)
+             handleTenantChange(undefined);
         }
         setIsLoadingTenants(false);
       }, (error) => {
@@ -246,12 +283,14 @@ export default function TenantBranchSelectionPage() {
       console.log("Tenant/Branch Page: User not assigned to a tenant via profile or not an admin. No tenants to display.");
       setTenantsData([]); setIsLoadingTenants(false);
       if (currentUser && !isLoadingUserProfile && !fetchError && userProfileAccess && !profileTenantId && profileRole !== 'admin') {
-          setFetchError("You are not assigned to a tenant or do not have permissions to view tenants.");
+          // This specific error should ideally be set in the profile fetching effect.
+          // setFetchError("You are not assigned to a tenant or do not have permissions to view tenants.");
       }
       handleTenantChange(undefined);
     }
     return () => unsubscribeTenants && unsubscribeTenants();
   }, [currentUser, isAuthLoading, userProfileAccess, isLoadingUserProfile, firebaseInitialized, selectedTenantId]);
+
 
   // Effect to load branches based on selectedTenantId
   useEffect(() => {
@@ -260,18 +299,19 @@ export default function TenantBranchSelectionPage() {
       return;
     }
     
-    setFetchError(null); 
-    setIsLoadingBranches(true);
-    console.log(`Tenant/Branch Page: Setting up Firestore listener for Branches of tenant: ${selectedTenantId}`);
-    
     const db = getDbInstance();
     if (!db) {
         console.error("Tenant/Branch Page: Firestore instance not available for branch fetch.");
         setFetchError("Database service failed to load.");
         setIsLoadingBranches(false);
+        setBranchesData([]);
         return;
     }
-
+    
+    setIsLoadingBranches(true);
+    setFetchError(null); 
+    console.log(`Tenant/Branch Page: Setting up Firestore listener for Branches of tenant: ${selectedTenantId}`);
+    
     const branchesQuery = query(collection(db, "branches"), where("tenant.id", "==", selectedTenantId));
     const unsubscribeBranches = onSnapshot(branchesQuery, (querySnapshot) => {
       const fetchedBranches: Branch[] = querySnapshot.docs.map(transformDocToBranch);
@@ -281,7 +321,9 @@ export default function TenantBranchSelectionPage() {
       const tenantMatchesUserAssignedTenant = userProfileAccess?.userTenantId === selectedTenantId;
 
       if (fetchedBranches.length === 0) {
+        setSelectedBranchId(undefined); // No branches, so no selection possible
         if (userAssignedBranchId && tenantMatchesUserAssignedTenant) {
+            // This error implies the user's assigned branch doesn't exist under the current tenant.
             setFetchError(`Your assigned branch (ID: ${userAssignedBranchId}) was not found for tenant ${selectedTenantId}.`);
         }
       } else if (userAssignedBranchId && tenantMatchesUserAssignedTenant && fetchedBranches.some(b => b.id === userAssignedBranchId)) {
@@ -289,6 +331,7 @@ export default function TenantBranchSelectionPage() {
       } else if (fetchedBranches.length === 1 && selectedBranchId !== fetchedBranches[0].id) {
         setSelectedBranchId(fetchedBranches[0].id);
       } else if (selectedBranchId && !fetchedBranches.some(b => b.id === selectedBranchId)) {
+        // If current selectedBranchId is no longer valid for this tenant (e.g., tenant changed)
         setSelectedBranchId(undefined);
       }
       setIsLoadingBranches(false);
@@ -299,6 +342,7 @@ export default function TenantBranchSelectionPage() {
 
     return () => unsubscribeBranches && unsubscribeBranches();
   }, [selectedTenantId, currentUser, isAuthLoading, userProfileAccess, isLoadingUserProfile, firebaseInitialized, selectedBranchId]);
+
 
   const getTenantPlaceholder = () => {
     if (!firebaseInitialized) return "Initializing...";

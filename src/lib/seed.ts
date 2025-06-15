@@ -38,12 +38,14 @@ if (!apiKeyFromEnv || !projectIdFromEnv) {
 }
 // ---- END DEBUGGING ----
 
-import { db } from './firebase'; // Ensure this path is correct
+// IMPORT SAU KHI dotenvConfig ĐÃ CHẠY VÀ CÁC BIẾN MÔI TRƯỜNG ĐÃ CÓ
+// initializeFirebaseClient must be called before accessing db(), auth(), app()
+import { initializeFirebaseClient, db as getDb } from './firebase';
 import { collection, doc, setDoc, writeBatch, Timestamp } from 'firebase/firestore';
-import type { 
-    Tenant, Branch, User, Menu, MenuItem, CafeTable, Promotion, Customer, 
+import type {
+    Tenant, Branch, User, Menu, MenuItem, CafeTable, Promotion, Customer,
     Order, OrderItem, QRPaymentRequest, Ingredient, BranchInventoryItem, MenuItemRecipeItem,
-    StockMovement, ShiftReport, Notification 
+    StockMovement, ShiftReport, Notification
 } from './types'; // Ensure this path is correct
 
 const tenantsData: Omit<Tenant, 'id' | 'createdAt' | 'updatedAt'>[] = [
@@ -61,48 +63,53 @@ const ingredientsData: Omit<Ingredient, 'id' | 'tenantId' | 'createdAt' | 'updat
 
 async function seedDatabase() {
     console.log('Starting database seed...');
-    const batch = writeBatch(db);
+    const firestoreDb = getDb(); // Get the Firestore instance after initialization
+    if (!firestoreDb) {
+      console.error("Lỗi: Firebase Firestore instance (db) chưa được khởi tạo. Hãy kiểm tra initializeFirebaseClient().");
+      process.exit(1);
+    }
+    const batch = writeBatch(firestoreDb);
 
     try {
         const tenantDocs: { id: string, data: Tenant }[] = [];
         for (const tenant of tenantsData) {
-            const tenantRef = doc(collection(db, 'tenants'));
-            const tenantFullData: Tenant = { 
-                id: tenantRef.id, ...tenant, 
-                createdAt: Timestamp.now(), // Use Timestamp.now() for direct execution
-                updatedAt: Timestamp.now()  // Use Timestamp.now()
+            const tenantRef = doc(collection(firestoreDb, 'tenants'));
+            const tenantFullData: Tenant = {
+                id: tenantRef.id, ...tenant,
+                createdAt: Timestamp.now(),
+                updatedAt: Timestamp.now()
             };
             batch.set(tenantRef, tenantFullData);
             tenantDocs.push({ id: tenantRef.id, data: tenantFullData });
             console.log(`Prepared tenant: ${tenant.name}`);
         }
 
-        const ingredientRefsByName: { [key: string]: string } = {}; 
+        const ingredientRefsByName: { [key: string]: string } = {};
 
         if (tenantDocs.length > 0) {
             const firstTenantId = tenantDocs[0].id;
-            
+
             for (const ingData of ingredientsData) {
-                const ingredientRef = doc(collection(db, 'ingredients'));
-                 const ingredientFullData: Ingredient = { 
-                    id: ingredientRef.id, 
-                    ...ingData, 
-                    tenantId: firstTenantId, 
-                    createdAt: Timestamp.now(), 
-                    updatedAt: Timestamp.now() 
-                };
-                batch.set(ingredientRef, ingredientFullData);
-                ingredientRefsByName[ingData.name] = ingredientRef.id;
-                console.log(`Prepared ingredient: ${ingData.name} for tenant ${firstTenantId}`);
+                const ingredientRef = doc(collection(firestoreDb, 'ingredients'));
+                   const ingredientFullData: Ingredient = {
+                     id: ingredientRef.id,
+                     ...ingData, // Includes name, unit, lowStockThreshold, category, description
+                     tenantId: firstTenantId,
+                     createdAt: Timestamp.now(),
+                     updatedAt: Timestamp.now()
+                   };
+                   batch.set(ingredientRef, ingredientFullData);
+                   ingredientRefsByName[ingData.name] = ingredientRef.id;
+                   console.log(`Prepared ingredient: ${ingData.name} for tenant ${firstTenantId}`);
             }
-        
+
             for (const tenantDoc of tenantDocs) {
                 const branches = [
                     { name: `Main Street Branch`, location: '123 Main St' },
                     { name: `Downtown Cafe`, location: '456 Central Ave' },
                 ];
                 for (const branchData of branches) {
-                    const branchRef = doc(collection(db, 'branches'));
+                    const branchRef = doc(collection(firestoreDb, 'branches'));
                     const branchFullData: Branch = {
                         id: branchRef.id,
                         ...branchData,
@@ -119,10 +126,10 @@ async function seedDatabase() {
                         { email: `cashier-${tenantDoc.id.substring(0,4)}-${branchRef.id.substring(0,4)}@example.com`, username: `Cashier ${branchData.name.split(" ")[0]}`, role: 'cashier', active: true, hashedPinCode: 'hashedpin789' },
                     ];
                     for (const userData of usersForBranch) {
-                        const userRef = doc(collection(db, 'users'));
+                        const userRef = doc(collection(firestoreDb, 'users'));
                         const userFullData: User = {
-                            id: userRef.id, 
-                            firebaseUid: `seed-fbuid-${userRef.id}`, 
+                            id: userRef.id, // User ID is the doc ID
+                            firebaseUid: `seed-fbuid-${userRef.id}`, // Placeholder
                             ...userData,
                             tenant: { id: tenantDoc.id },
                             branch: { id: branchRef.id, name: branchFullData.name },
@@ -132,72 +139,93 @@ async function seedDatabase() {
                         batch.set(userRef, userFullData);
                         console.log(`Prepared user: ${userData.username} for branch ${branchData.name}`);
                     }
-
-                    const tablesForBranch: Omit<CafeTable, 'id' | 'branchId'>[] = [
-                        { tableNumber: 'A1', zone: 'Indoors', status: 'available' },
-                        { tableNumber: 'A2', zone: 'Indoors', status: 'occupied', currentOrder: { id: 'dummy-order-1', orderNumber: 'ORD-001' } },
-                        { tableNumber: 'B1', zone: 'Patio', status: 'reserved' },
+                    
+                    const tablesForBranch: Omit<CafeTable, 'id' | 'branch' | 'createdAt' | 'updatedAt' | 'isActive'>[] = [
+                        { tableNumber: 'A1', zone: 'Indoors', status: 'available', capacity: 2 },
+                        { tableNumber: 'A2', zone: 'Indoors', status: 'occupied', currentOrder: { id: 'dummy-order-1', orderNumber: 'ORD-001' }, capacity: 4 },
+                        { tableNumber: 'B1', zone: 'Patio', status: 'reserved', capacity: 4 },
                     ];
+
                     for (const tableData of tablesForBranch) {
-                        const tableRef = doc(collection(db, 'branches', branchRef.id, 'tables'));
-                        batch.set(tableRef, {id: tableRef.id, branchId: branchRef.id, ...tableData}); 
+                        const tableRef = doc(collection(firestoreDb, 'branches', branchRef.id, 'tables'));
+                        const tableFullData: CafeTable = {
+                            id: tableRef.id,
+                            branch: { id: branchRef.id, name: branchFullData.name },
+                            ...tableData,
+                            isActive: true, // Default to active
+                            createdAt: Timestamp.now(),
+                            updatedAt: Timestamp.now(),
+                        };
+                        batch.set(tableRef, tableFullData);
                         console.log(`Prepared table: ${tableData.tableNumber} for branch ${branchData.name}`);
                     }
 
-                     if (tenantDoc.id === firstTenantId) { 
+
+                    if (tenantDoc.id === firstTenantId) { // Seed inventory only for the first tenant's branches for simplicity
                         for(const ingName in ingredientRefsByName) {
                             const ingId = ingredientRefsByName[ingName];
-                            // Path for inventory is /branches/{branchId}/inventory/{ingredientId}
-                            // The document ID *is* the ingredientId
-                            const inventoryRef = doc(db, 'branches', branchRef.id, 'inventory', ingId); 
+                            const inventoryRef = doc(firestoreDb, 'branches', branchRef.id, 'inventory', ingId);
                             const ingDetails = ingredientsData.find(i => i.name === ingName);
-                            const invData: Omit<BranchInventoryItem, 'updatedAt' | 'ingredientId'> = { // ingredientId is the doc ID
+                            const invData: BranchInventoryItem = {
+                                id: ingId, // ID is the ingredientId
+                                branch: { id: branchRef.id, name: branchFullData.name },
+                                ingredient: { id: ingId, name: ingName, unit: ingDetails?.unit || 'unit' },
                                 currentQuantity: Math.floor(Math.random() * ( (ingDetails?.lowStockThreshold || 50) * 3)) + (ingDetails?.lowStockThreshold || 50) ,
-                                ingredientName: ingName,
-                                unit: ingDetails?.unit || 'unit',
+                                createdAt: Timestamp.now(),
+                                updatedAt: Timestamp.now(),
                             };
-                            batch.set(inventoryRef, {...invData, updatedAt: Timestamp.now() });
+                            batch.set(inventoryRef, invData);
                             console.log(`Prepared inventory for ${ingName} at branch ${branchData.name}`);
                         }
                     }
                 }
             }
         }
-        
+
         if (tenantDocs.length > 0) {
             const firstTenant = tenantDocs[0];
-            const menuData: Omit<Menu, 'id' | 'createdAt' | 'updatedAt' | 'tenant'> = {
+            const menuData: Omit<Menu, 'id' | 'createdAt' | 'updatedAt' | 'tenant' | 'version'> = {
                 name: 'Main Menu', isActive: true, description: 'Our signature offerings'
             };
-            const menuRef = doc(collection(db, 'menus'));
+            const menuRef = doc(collection(firestoreDb, 'menus'));
             const menuFullData : Menu = {
-                id: menuRef.id, ...menuData, tenant: { id: firstTenant.id },
+                id: menuRef.id, ...menuData, tenant: { id: firstTenant.id, name: firstTenant.data.name },
+                version: '1.0',
                 createdAt: Timestamp.now(), updatedAt: Timestamp.now()
             }
             batch.set(menuRef, menuFullData);
             console.log(`Prepared menu: ${menuData.name} for tenant ${firstTenant.data.name}`);
 
-            const menuItemsData: Omit<MenuItem, 'id' | 'menuId'>[] = [
-                { name: 'Espresso', category: 'Coffee', price: 2.50, unit: 'cup', available: true },
-                { name: 'Latte', category: 'Coffee', price: 3.50, unit: 'cup', available: true },
-                { name: 'Cappuccino', category: 'Coffee', price: 3.50, unit: 'cup', available: false },
-                { name: 'Croissant', category: 'Pastries', price: 2.00, unit: 'piece', available: true },
-                { name: 'Blueberry Muffin', category: 'Pastries', price: 2.25, unit: 'piece', available: true },
+            const menuItemsData: Omit<MenuItem, 'id' | 'menu' | 'createdAt' | 'updatedAt'>[] = [
+                { name: 'Espresso', category: 'Coffee', price: 2.50, unit: 'cup', available: true, imageUrl: 'https://placehold.co/100x100/A0A0A0/FFFFFF?text=Espresso', tags: ['hot'] },
+                { name: 'Latte', category: 'Coffee', price: 3.50, unit: 'cup', available: true, imageUrl: 'https://placehold.co/100x100/B0B0B0/FFFFFF?text=Latte', tags: ['hot'] },
+                { name: 'Cappuccino', category: 'Coffee', price: 3.50, unit: 'cup', available: false, imageUrl: 'https://placehold.co/100x100/C0C0C0/FFFFFF?text=Cappuccino', tags: ['hot'] },
+                { name: 'Croissant', category: 'Pastries', price: 2.00, unit: 'piece', available: true, imageUrl: 'https://placehold.co/100x100/D0D0D0/FFFFFF?text=Croissant', tags: ['baked'] },
+                { name: 'Blueberry Muffin', category: 'Pastries', price: 2.25, unit: 'piece', available: true, imageUrl: 'https://placehold.co/100x100/E0E0E0/FFFFFF?text=Muffin', tags: ['baked', 'fruit'] },
             ];
             for (const itemData of menuItemsData) {
-                const itemRef = doc(collection(db, 'menus', menuRef.id, 'items'));
-                batch.set(itemRef, {id: itemRef.id, menuId: menuRef.id, ...itemData}); 
+                const itemRef = doc(collection(firestoreDb, 'menus', menuRef.id, 'items'));
+                const itemFullData: MenuItem = {
+                  id: itemRef.id,
+                  menu: { id: menuRef.id, name: menuFullData.name },
+                  ...itemData,
+                  createdAt: Timestamp.now(),
+                  updatedAt: Timestamp.now(),
+                };
+                batch.set(itemRef, itemFullData);
                 console.log(`Prepared menu item: ${itemData.name} for menu ${menuData.name}`);
-                
+
                 if (itemData.name === 'Espresso' && ingredientRefsByName['Coffee Beans - Arabica']) {
                     const recipeIngredientId = ingredientRefsByName['Coffee Beans - Arabica'];
-                    // Path: /menus/{menuId}/items/{itemId}/recipe/{ingredientId}
-                    // The document ID *is* the ingredientId
-                    const recipeIngredientRef = doc(db, 'menus', menuRef.id, 'items', itemRef.id, 'recipe', recipeIngredientId);
-                    const recipeItemData: Omit<MenuItemRecipeItem, 'id'> = { 
-                        quantityNeeded: 18, 
-                        unit: 'gram', 
-                        ingredientName: 'Coffee Beans - Arabica' 
+                    const recipeIngredientRef = doc(firestoreDb, 'menus', menuRef.id, 'items', itemRef.id, 'recipes', recipeIngredientId);
+                    const ingDetails = ingredientsData.find(i => i.name === 'Coffee Beans - Arabica');
+                    const recipeItemData: MenuItemRecipeItem = {
+                        id: recipeIngredientId,
+                        menuItem: { id: itemRef.id, name: itemData.name },
+                        ingredient: { id: recipeIngredientId, name: 'Coffee Beans - Arabica', unit: ingDetails?.unit || 'gram' },
+                        quantityNeeded: 18,
+                        createdAt: Timestamp.now(),
+                        updatedAt: Timestamp.now(),
                     };
                     batch.set(recipeIngredientRef, recipeItemData);
                     console.log(`Prepared recipe for Espresso`);
@@ -206,22 +234,23 @@ async function seedDatabase() {
         }
 
         if (tenantDocs.length > 0) {
-            const firstTenantId = tenantDocs[0].id;
-            const promotionsData: Omit<Promotion, 'id'|'tenantId'|'createdAt'|'updatedAt'>[] = [
-                { name: 'Grand Opening 10% Off', code: 'OPEN10', type: 'percentage', value: 10, minOrderValue: 5, startDate: Timestamp.fromDate(new Date()), endDate: Timestamp.fromDate(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)), isActive: true },
-                { name: 'Summer Special $2 Off', code: 'SUMMER2', type: 'fixed_amount', value: 2, minOrderValue: 10, startDate: Timestamp.fromDate(new Date()), endDate: Timestamp.fromDate(new Date(Date.now() + 60 * 24 * 60 * 60 * 1000)), isActive: true },
+            const firstTenant = tenantDocs[0];
+            const promotionsData: Omit<Promotion, 'id'|'tenant'|'createdAt'|'updatedAt'>[] = [
+                { name: 'Grand Opening 10% Off', code: 'OPEN10', type: 'percentage', value: 10, minOrderValue: 5, startDate: Timestamp.fromDate(new Date()), endDate: Timestamp.fromDate(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)), isActive: true, appliesTo: 'all_orders' },
+                { name: 'Summer Special $2 Off', code: 'SUMMER2', type: 'fixed_amount', value: 2, minOrderValue: 10, startDate: Timestamp.fromDate(new Date()), endDate: Timestamp.fromDate(new Date(Date.now() + 60 * 24 * 60 * 60 * 1000)), isActive: true, appliesTo: 'specific_items' },
             ];
             for (const promoData of promotionsData) {
-                const promoRef = doc(collection(db, 'promotions'));
-                batch.set(promoRef, { 
-                    id: promoRef.id, ...promoData, tenantId: firstTenantId, 
-                    createdAt: Timestamp.now(), 
-                    updatedAt: Timestamp.now() 
-                });
+                const promoRef = doc(collection(firestoreDb, 'promotions'));
+                const promoFullData: Promotion = {
+                    id: promoRef.id, ...promoData, tenant: { id: firstTenant.id, name: firstTenant.data.name },
+                    createdAt: Timestamp.now(),
+                    updatedAt: Timestamp.now()
+                };
+                batch.set(promoRef, promoFullData);
                 console.log(`Prepared promotion: ${promoData.name}`);
             }
         }
-        
+
         await batch.commit();
         console.log('Database seeded successfully!');
 
@@ -231,8 +260,16 @@ async function seedDatabase() {
 }
 
 if (require.main === module) {
-    seedDatabase().catch(err => {
-        console.error("Unhandled error in seedDatabase:", err);
+    // initializeFirebaseClient() is called here, after dotenv has loaded env vars,
+    // and before seedDatabase() which requires the db instance.
+    try {
+        initializeFirebaseClient();
+        seedDatabase().catch(err => {
+            console.error("Unhandled error in seedDatabase:", err);
+            process.exit(1);
+        });
+    } catch (initError) {
+        console.error("CRITICAL ERROR during Firebase initialization in seed script:", initError);
         process.exit(1);
-    });
+    }
 }

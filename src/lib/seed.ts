@@ -38,7 +38,7 @@ if (!apiKeyFromEnv || !projectIdFromEnv) {
 // ---- END DEBUGGING ----
 
 import { initializeFirebaseClient, db as getDb } from './firebase';
-import { collection, doc, setDoc, writeBatch, Timestamp, where, query, getDocs, deleteDoc } from 'firebase/firestore';
+import { collection, doc, setDoc, writeBatch, Timestamp, where, query, getDocs, deleteDoc, limit } from 'firebase/firestore'; // Added limit
 import type {
     Tenant, Branch, User, Menu, MenuItem, CafeTable, Promotion, CustomerLoyalty,
     Order, OrderItem, QRPaymentRequest, Ingredient, BranchInventoryItem, MenuItemRecipeItem,
@@ -99,16 +99,17 @@ async function seedDatabase() {
     // Clear existing data (optional, use with caution)
     // Add collections you want to clear before seeding
     const collectionsToClear = [
-        'users', 'branches', 'menus', 'promotions',
+        'users', 'branches', 'menus', 'promotions', 'tenants',
         'customerLoyalty', 'ingredients', 'notifications',
-        // Be very careful with clearing subcollections or do it manually
-        // For subcollections, you'd need to iterate through parent docs first
+        // For subcollections, you'd need to iterate through parent docs first to clear them,
+        // or ensure parent docs are cleared (which cascades to subcollections in a way)
     ];
     // for (const coll of collectionsToClear) {
     //    await clearExistingData(firestoreDb, coll);
     // }
-    // Note: Clearing subcollections like 'items' in 'menus' or 'tables' in 'branches' requires more complex logic.
-    // This example focuses on seeding top-level collections for simplicity of clearing.
+    // Note: Clearing subcollections like 'items' in 'menus' or 'tables' in 'branches' requires more complex logic
+    // if you want to keep parent documents. This example implies that if parent collections like 'branches' or 'menus'
+    // are cleared, their subcollections effectively go away too.
 
     const batch = writeBatch(firestoreDb);
 
@@ -118,7 +119,8 @@ async function seedDatabase() {
         const serverAdminFullData: User = {
             id: serverAdminRef.id,
             ...serverAdminData,
-            // NO tenant, NO branch for server admin
+            // NO tenant, NO branch for server admin explicitly set here.
+            // Their access is determined by role='admin' in application logic.
             createdAt: Timestamp.now(),
             updatedAt: Timestamp.now()
         };
@@ -141,14 +143,14 @@ async function seedDatabase() {
 
         // 3. Create Ingredients (linked to the first tenant for this seed)
         const ingredientDocs: { id: string, data: Ingredient, denormalized: DenormalizedIngredientRef }[] = [];
-        const firstTenantForIngredients = tenantDocs[0];
+        const firstTenantForIngredients = tenantDocs[0]; // Assuming at least one tenant exists
         if (firstTenantForIngredients) {
             for (const ingData of ingredientsSeedData) {
                 const ingredientRef = doc(collection(firestoreDb, 'ingredients'));
                    const ingredientFullData: Ingredient = {
                      id: ingredientRef.id,
                      ...ingData,
-                     tenantId: firstTenantForIngredients.id,
+                     tenantId: firstTenantForIngredients.id, // Link to the first tenant
                      createdAt: Timestamp.now(),
                      updatedAt: Timestamp.now()
                    };
@@ -169,8 +171,8 @@ async function seedDatabase() {
 
             // 4a. Create Branches for the current Tenant
             const branchSeedData = [
-                { name: `${tenantDoc.data.name} - Main St`, location: '123 Main St' },
-                { name: `${tenantDoc.data.name} - Downtown`, location: '456 Central Ave' },
+                { name: `${tenantDoc.data.name} - Main St`, location: '123 Main St, Anytown' },
+                { name: `${tenantDoc.data.name} - Downtown`, location: '456 Central Ave, Anytown' },
             ];
             const branchDocs: { id: string, data: Branch, denormalized: DenormalizedBranchRef }[] = [];
             for (const branchData of branchSeedData) {
@@ -198,7 +200,7 @@ async function seedDatabase() {
                     const userRef = doc(collection(firestoreDb, 'users'));
                     const userFullData: User = {
                         id: userRef.id,
-                        firebaseUid: `seed-fbuid-${userRef.id}`, // Placeholder
+                        firebaseUid: `seed-fbuid-${userRef.id}`, // Placeholder, real apps would get this from Auth
                         ...userData,
                         tenant: currentTenantRef,
                         branch: branchDoc.denormalized,
@@ -215,7 +217,7 @@ async function seedDatabase() {
                     { tableNumber: 'A2', zone: 'Indoors', status: 'occupied', currentOrder: { id: `dummy-order-${branchDoc.id}-A2`, orderNumber: `ORD-${branchDoc.id.slice(0,3)}-A2` }, capacity: 4, isActive: true },
                     { tableNumber: 'B1', zone: 'Patio', status: 'reserved', capacity: 4, isActive: true },
                     { tableNumber: 'B2', zone: 'Patio', status: 'cleaning', capacity: 2, isActive: true },
-                    { tableNumber: 'C1', zone: 'Bar', status: 'available', capacity: 1, isActive: false },
+                    { tableNumber: 'C1', zone: 'Bar', status: 'available', capacity: 1, isActive: false }, // Inactive table
                 ];
                 for (const tableData of tablesForBranch) {
                     const tableRef = doc(collection(firestoreDb, 'branches', branchDoc.id, 'tables'));
@@ -231,10 +233,10 @@ async function seedDatabase() {
                 }
 
                 // 4d. Create BranchInventoryItems for each Branch (using ingredients from firstTenant)
-                for(const ingDoc of ingredientDocs) {
-                    const inventoryRef = doc(firestoreDb, 'branches', branchDoc.id, 'inventory', ingDoc.id);
+                for(const ingDoc of ingredientDocs) { // Ensure ingredientDocs is populated from step 3
+                    const inventoryRef = doc(firestoreDb, 'branches', branchDoc.id, 'inventory', ingDoc.id); // Doc ID is ingredient ID
                     const invData: BranchInventoryItem = {
-                        id: ingDoc.id,
+                        id: ingDoc.id, // Ensure this matches the document ID for this subcollection
                         branch: branchDoc.denormalized,
                         ingredient: ingDoc.denormalized,
                         currentQuantity: Math.floor(Math.random() * ((ingDoc.data.lowStockThreshold || 50) * 3)) + (ingDoc.data.lowStockThreshold || 50),
@@ -246,35 +248,47 @@ async function seedDatabase() {
                 }
                  // 4e. Create ShiftReports for each Branch
                 const shiftReportRef = doc(collection(firestoreDb, 'branches', branchDoc.id, 'shiftReports'));
-                const cashierUserForReport = (await getDocs(query(collection(firestoreDb, 'users'), where('branch.id', '==', branchDoc.id), where('role', '==', 'cashier')))).docs[0];
-                const denormalizedCashierUser: DenormalizedUserRef | undefined = cashierUserForReport ? {id: cashierUserForReport.id, username: cashierUserForReport.data().username} : undefined;
+                // Attempt to find a cashier user for this branch to assign to the report
+                const cashierUserQuery = query(
+                    collection(firestoreDb, 'users'),
+                    where('branch.id', '==', branchDoc.id),
+                    where('role', '==', 'cashier'),
+                    limit(1)
+                );
+                const cashierUserForReportSnapshot = await getDocs(cashierUserQuery);
+                const cashierUserDoc = cashierUserForReportSnapshot.docs[0];
+                const denormalizedCashierUser: DenormalizedUserRef | undefined = cashierUserDoc
+                    ? {id: cashierUserDoc.id, username: cashierUserDoc.data().username}
+                    : undefined;
 
                 if (denormalizedCashierUser) {
                     const shiftReportData: ShiftReport = {
                         id: shiftReportRef.id,
                         user: denormalizedCashierUser,
                         startTime: Timestamp.fromDate(new Date(Date.now() - 8 * 60 * 60 * 1000)), // 8 hours ago
-                        endTime: Timestamp.now(),
+                        endTime: Timestamp.now(), // Closed now
                         status: 'closed',
-                        finalRevenue: Math.random() * 500 + 200,
+                        finalRevenue: Math.random() * 500 + 200, // Random revenue
                         totalCashIn: Math.random() * 200 + 50,
                         totalCardIn: Math.random() * 300 + 100,
                         totalQrIn: Math.random() * 50 + 10,
                         totalTransactions: Math.floor(Math.random() * 50) + 10,
-                        notes: 'Productive shift.',
+                        notes: 'Productive shift. All systems nominal.',
                         branch: branchDoc.denormalized,
                         createdAt: Timestamp.now(),
                         updatedAt: Timestamp.now(),
                     };
                     batch.set(shiftReportRef, shiftReportData);
                     console.log(`Prepared shift report for branch ${branchDoc.data.name}`);
+                } else {
+                    console.warn(`Could not find a cashier to assign to shift report for branch ${branchDoc.data.name}. Skipping report.`);
                 }
             }
 
 
             // 4f. Create Menu for the current Tenant
             const menuData: Omit<Menu, 'id' | 'createdAt' | 'updatedAt' | 'tenant' > = {
-                name: `${tenantDoc.data.name} Main Menu`, isActive: true, description: 'Our signature offerings', version: '1.0.0'
+                name: `${tenantDoc.data.name} Main Menu`, isActive: true, description: 'Our signature offerings and daily specials.', version: '1.0.0'
             };
             const menuRef = doc(collection(firestoreDb, 'menus'));
             const menuFullData : Menu = {
@@ -288,12 +302,12 @@ async function seedDatabase() {
 
             // 4g. Create MenuItems for the Menu
             const menuItemsSeedData: Omit<MenuItem, 'id' | 'menu' | 'createdAt' | 'updatedAt'>[] = [
-                { name: 'Espresso', category: 'Coffee', price: 2.75, unit: 'cup', available: true, imageUrl: 'https://placehold.co/100x100/A0A0A0/FFFFFF?text=Espresso', tags: ['hot', 'strong'] ,dataAiHint: 'espresso shot' },
-                { name: 'Latte', category: 'Coffee', price: 3.50, unit: 'cup', available: true, imageUrl: 'https://placehold.co/100x100/B0B0B0/FFFFFF?text=Latte', tags: ['hot', 'milk'] ,dataAiHint: 'latte art' },
-                { name: 'Cappuccino', category: 'Coffee', price: 3.60, unit: 'cup', available: false, imageUrl: 'https://placehold.co/100x100/C0C0C0/FFFFFF?text=Cappuccino', tags: ['hot', 'milk', 'foam'] ,dataAiHint: 'cappuccino foam' },
-                { name: 'Plain Croissant', category: 'Pastries', price: 2.20, unit: 'piece', available: true, imageUrl: 'https://placehold.co/100x100/D0D0D0/FFFFFF?text=Croissant', tags: ['baked', 'pastry'] ,dataAiHint: 'croissant pastry' },
-                { name: 'Blueberry Muffin', category: 'Pastries', price: 2.50, unit: 'piece', available: true, imageUrl: 'https://placehold.co/100x100/E0E0E0/FFFFFF?text=Muffin', tags: ['baked', 'fruit', 'sweet'] ,dataAiHint: 'blueberry muffin' },
-                { name: 'Iced Black Tea', category: 'Tea', price: 3.00, unit: 'glass', available: true, imageUrl: 'https://placehold.co/100x100/A5B5C5/FFFFFF?text=Iced+Tea', tags: ['cold', 'refreshing'] ,dataAiHint: 'iced tea' },
+                { name: 'Espresso', category: 'Coffee', price: 2.75, unit: 'cup', available: true, imageUrl: 'https://placehold.co/100x100/A0522D/FFFFFF?text=Espresso', tags: ['hot', 'strong', 'classic'], dataAiHint: 'espresso shot' },
+                { name: 'Latte', category: 'Coffee', price: 3.50, unit: 'cup', available: true, imageUrl: 'https://placehold.co/100x100/D2B48C/000000?text=Latte', tags: ['hot', 'milk', 'smooth'], dataAiHint: 'latte art' },
+                { name: 'Cappuccino', category: 'Coffee', price: 3.60, unit: 'cup', available: false, imageUrl: 'https://placehold.co/100x100/8B4513/FFFFFF?text=Cappuccino', tags: ['hot', 'milk', 'foam', 'popular'], dataAiHint: 'cappuccino foam' },
+                { name: 'Plain Croissant', category: 'Pastries', price: 2.20, unit: 'piece', available: true, imageUrl: 'https://placehold.co/100x100/F5DEB3/000000?text=Croissant', tags: ['baked', 'pastry', 'butter'], dataAiHint: 'croissant pastry' },
+                { name: 'Blueberry Muffin', category: 'Pastries', price: 2.50, unit: 'piece', available: true, imageUrl: 'https://placehold.co/100x100/ADD8E6/000000?text=Muffin', tags: ['baked', 'fruit', 'sweet', 'moist'], dataAiHint: 'blueberry muffin' },
+                { name: 'Iced Black Tea', category: 'Tea', price: 3.00, unit: 'glass', available: true, imageUrl: 'https://placehold.co/100x100/36454F/FFFFFF?text=Iced+Tea', tags: ['cold', 'refreshing', 'tea'], dataAiHint: 'iced tea glass' },
             ];
             const menuItemDocs: {id: string, data: MenuItem, denormalized: DenormalizedMenuItemRef}[] = [];
             for (const itemData of menuItemsSeedData) {
@@ -312,17 +326,17 @@ async function seedDatabase() {
                 // 4h. Create MenuItemRecipeItems
                 if (itemData.name === 'Espresso' && ingredientDocs.find(i => i.data.name === 'Coffee Beans - Arabica')) {
                     const coffeeIngredientDoc = ingredientDocs.find(i => i.data.name === 'Coffee Beans - Arabica')!;
-                    const recipeIngredientRef = doc(firestoreDb, 'menus', menuRef.id, 'items', itemRef.id, 'recipes', coffeeIngredientDoc.id);
+                    const recipeIngredientRef = doc(firestoreDb, 'menus', menuRef.id, 'items', itemRef.id, 'recipes', coffeeIngredientDoc.id); // Doc ID is ingredient ID
                     const recipeItemData: MenuItemRecipeItem = {
-                        id: coffeeIngredientDoc.id,
-                        menuItem: { id: itemRef.id, name: itemData.name, price: itemData.price, unit: itemData.unit },
-                        ingredient: coffeeIngredientDoc.denormalized,
+                        id: coffeeIngredientDoc.id, // This is the ingredientId
+                        menuItem: { id: itemRef.id, name: itemData.name, price: itemData.price, unit: itemData.unit }, // Denormalized ref to MenuItem
+                        ingredient: coffeeIngredientDoc.denormalized, // Denormalized ref to Ingredient
                         quantityNeeded: 18, // grams of coffee for espresso
                         createdAt: Timestamp.now(),
                         updatedAt: Timestamp.now(),
                     };
                     batch.set(recipeIngredientRef, recipeItemData);
-                    console.log(`Prepared recipe for Espresso`);
+                    console.log(`Prepared recipe for Espresso (using ${coffeeIngredientDoc.data.name})`);
                 }
                  if (itemData.name === 'Latte' && ingredientDocs.find(i => i.data.name === 'Coffee Beans - Arabica') && ingredientDocs.find(i => i.data.name === 'Full Cream Milk')) {
                     const coffeeIng = ingredientDocs.find(i => i.data.name === 'Coffee Beans - Arabica')!;
@@ -377,12 +391,15 @@ async function seedDatabase() {
             // 4k. Create Orders with OrderItems & QRPaymentRequests for a branch
             if (branchDocs.length > 0 && menuItemDocs.length > 1) {
                 const sampleBranch = branchDocs[0]; // Use first branch of current tenant
-                const firstUserSnapshot = await getDocs(query(collection(firestoreDb, 'users'), where('branch.id', '==', sampleBranch.id), where('role', '==', 'cashier'), limit(1)));
-                const sampleUserDoc = firstUserSnapshot.docs[0];
+                // Find a sample user and table from the current branch
+                const orderUserQuery = query(collection(firestoreDb, 'users'), where('branch.id', '==', sampleBranch.id), where('role', '==', 'cashier'), limit(1));
+                const orderUserSnapshot = await getDocs(orderUserQuery);
+                const sampleUserDoc = orderUserSnapshot.docs[0];
                 const sampleUserRef: DenormalizedUserRef | undefined = sampleUserDoc ? { id: sampleUserDoc.id, username: sampleUserDoc.data().username } : undefined;
 
-                const firstTableSnapshot = await getDocs(query(collection(firestoreDb, 'branches', sampleBranch.id, 'tables'), where('status', '==', 'available'), limit(1)));
-                const sampleTableDoc = firstTableSnapshot.docs[0];
+                const orderTableQuery = query(collection(firestoreDb, 'branches', sampleBranch.id, 'tables'), where('status', '==', 'available'), limit(1));
+                const orderTableSnapshot = await getDocs(orderTableQuery);
+                const sampleTableDoc = orderTableSnapshot.docs[0];
                 const sampleTableRef: DenormalizedTableRef | undefined = sampleTableDoc ? {id: sampleTableDoc.id, tableNumber: sampleTableDoc.data().tableNumber} : undefined;
 
 
@@ -390,7 +407,7 @@ async function seedDatabase() {
                     const orderRef = doc(collection(firestoreDb, 'branches', sampleBranch.id, 'orders'));
                     const orderData: Order = {
                         id: orderRef.id,
-                        orderNumber: `ORD-${sampleBranch.id.slice(0,3)}-${orderRef.id.slice(0,4)}`,
+                        orderNumber: `ORD-${sampleBranch.id.slice(0,3)}-${orderRef.id.slice(0,4).toUpperCase()}`,
                         status: 'pending',
                         type: 'dine-in',
                         totalAmount: 0, // Will be calculated based on items
@@ -419,15 +436,15 @@ async function seedDatabase() {
                         id: orderItem2Ref.id,
                         menuItem: menuItemDocs[3].denormalized, // Croissant
                         quantity: 1,
-                        note: 'Extra crispy',
+                        note: 'Extra crispy, please.',
                         createdAt: Timestamp.now(),
                         updatedAt: Timestamp.now(),
                     };
                     batch.set(orderItem2Ref, orderItem2Data);
                     orderData.totalAmount += (menuItemDocs[3].denormalized.price * 1);
-                    orderData.finalAmount = orderData.totalAmount; // Assuming no tax/discount for seed
+                    orderData.finalAmount = orderData.totalAmount; // Assuming no tax/discount for seed simplicity
 
-                    batch.set(orderRef, orderData);
+                    batch.set(orderRef, orderData); // Set the order data after items are processed for totalAmount
                     console.log(`Prepared order ${orderData.orderNumber} with items for branch ${sampleBranch.data.name}`);
 
                     // Create QRPaymentRequest for this order
@@ -437,7 +454,7 @@ async function seedDatabase() {
                         order: { id: orderRef.id, orderNumber: orderData.orderNumber },
                         amount: orderData.finalAmount,
                         status: 'pending',
-                        qrContent: `PAYMENT_QR_CODE_FOR_${orderRef.id}_AMOUNT_${orderData.finalAmount}`,
+                        qrContent: `PAYMENT_QR_CODE_FOR_ORDER_${orderRef.id}_AMOUNT_${orderData.finalAmount}`,
                         expiresAt: Timestamp.fromDate(new Date(Date.now() + 15 * 60 * 1000)), // Expires in 15 mins
                         branch: sampleBranch.denormalized,
                         tenant: currentTenantRef,
@@ -447,14 +464,18 @@ async function seedDatabase() {
                     batch.set(qrPaymentRef, qrPaymentData);
                     console.log(`Prepared QR payment request for order ${orderData.orderNumber}`);
 
-                    // Create StockMovements for the items sold in this order
-                    const espressoIngredientDoc = ingredientDocs.find(i => i.data.name === 'Coffee Beans - Arabica');
-                    if (espressoIngredientDoc) {
+                    // Create StockMovements for the items sold in this order (example for Espresso)
+                    const espressoRecipeItem = menuItemDocs[0].data.name === 'Espresso' ? 
+                        (await getDocs(collection(firestoreDb, 'menus', denormalizedMenuRef.id, 'items', menuItemDocs[0].id, 'recipes'))).docs
+                        .map(d => d.data() as MenuItemRecipeItem)
+                        .find(r => r.ingredient.name === 'Coffee Beans - Arabica') : undefined;
+
+                    if (espressoRecipeItem) {
                         const stockMovementEspressoRef = doc(collection(firestoreDb, 'branches', sampleBranch.id, 'stockMovements'));
                         const stockMovementEspresso: StockMovement = {
                             id: stockMovementEspressoRef.id,
-                            ingredient: espressoIngredientDoc.denormalized,
-                            quantity: - (18 * 2), // 18g per espresso * 2 espressos
+                            ingredient: espressoRecipeItem.ingredient, // Use the denormalized ingredient from recipe
+                            quantity: - (espressoRecipeItem.quantityNeeded * orderItem1Data.quantity), // quantityNeeded * items ordered
                             type: 'sale_out',
                             source: `Order ${orderData.orderNumber}`,
                             user: sampleUserRef,
@@ -463,8 +484,10 @@ async function seedDatabase() {
                             updatedAt: Timestamp.now(),
                         };
                         batch.set(stockMovementEspressoRef, stockMovementEspresso);
-                        console.log(`Prepared stock movement for Espresso sale`);
+                        console.log(`Prepared stock movement for Espresso sale (deducted ${espressoRecipeItem.ingredient.name})`);
                     }
+                } else {
+                    console.warn(`Could not find sample user or table for branch ${sampleBranch.data.name}. Skipping order creation.`);
                 }
             }
         }
@@ -474,32 +497,33 @@ async function seedDatabase() {
         const notification1: Notification = {
             id: notification1Ref.id,
             type: 'system_update',
-            message: 'CoffeeOS has been updated to version 1.1. Enjoy new features!',
+            message: 'CoffeeOS has been updated to version 1.2. Enjoy new features and improvements!',
             status: 'unread',
             createdAt: Timestamp.now(),
             updatedAt: Timestamp.now(),
-            // No tenant/branch/user means it's a global notification
+            // No tenant/branch/user means it's a global notification for all admins or system-wide display
         };
         batch.set(notification1Ref, notification1);
         console.log(`Prepared global notification: ${notification1.message}`);
 
         if (tenantDocs.length > 0 && ingredientDocs.length > 0) {
-            const lowStockIng = ingredientDocs.find(ing => ing.data.lowStockThreshold && ing.data.name === 'Vanilla Syrup'); // Example
+            // Find an ingredient that might be low stock, e.g., Vanilla Syrup
+            const lowStockIng = ingredientDocs.find(ing => ing.data.name === 'Vanilla Syrup');
             if (lowStockIng) {
                 const notification2Ref = doc(collection(firestoreDb, 'notifications'));
                 const notification2: Notification = {
                     id: notification2Ref.id,
                     type: 'low_stock_warning',
-                    message: `Ingredient '${lowStockIng.data.name}' is running low. Current quantity: approx 500ml.`,
+                    message: `Ingredient '${lowStockIng.data.name}' is running low. Current quantity estimate is below threshold. Please check branch inventories.`,
                     status: 'unread',
                     tenant: {id: lowStockIng.data.tenantId, name: tenantDocs.find(t=>t.id === lowStockIng.data.tenantId)?.data.name || 'Unknown Tenant'},
-                    // Could also target specific branch or users
+                    // Could also target specific branch or users if needed for more granular alerts
                     relatedEntity: { type: 'ingredient', id: lowStockIng.id },
                     createdAt: Timestamp.now(),
                     updatedAt: Timestamp.now(),
                 };
                 batch.set(notification2Ref, notification2);
-                console.log(`Prepared low stock notification for ${lowStockIng.data.name}`);
+                console.log(`Prepared low stock warning notification for ${lowStockIng.data.name}`);
             }
         }
 
@@ -512,16 +536,15 @@ async function seedDatabase() {
     }
 }
 
+// Ensure Firebase is initialized AFTER .env is loaded and BEFORE seedDatabase is called
 if (require.main === module) {
-    try {
-        initializeFirebaseClient();
-        seedDatabase().catch(err => {
-            console.error("Unhandled error in seedDatabase:", err);
-            process.exit(1);
-        });
-    } catch (initError) {
-        console.error("CRITICAL ERROR during Firebase initialization in seed script:", initError);
+    // Critical environment variable checks are already done above.
+    // If they pass, proceed to initialize Firebase.
+    initializeFirebaseClient(); // Initialize Firebase services
+
+    seedDatabase().catch(err => {
+        console.error("Unhandled error in seedDatabase:", err);
         process.exit(1);
-    }
+    });
 }
 

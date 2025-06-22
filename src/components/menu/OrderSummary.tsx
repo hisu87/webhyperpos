@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
-import { Trash2, CreditCard, DivideSquare, Percent } from 'lucide-react';
+import { Trash2, CreditCard, DivideSquare, Percent, Save, Loader2 } from 'lucide-react';
 import { PAYMENT_METHODS } from '@/lib/constants';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
@@ -17,9 +17,12 @@ interface OrderSummaryProps {
   onRemoveItem: (itemId: string) => void;
   onClearOrder: () => void;
   onCheckout: (paymentMethod: string) => void;
+  onSaveOrder?: () => void; // Optional save handler
+  isSavingOrder?: boolean;
+  selectedTable?: {id: string; number: string} | null;
 }
 
-export function OrderSummary({ items, onRemoveItem, onClearOrder, onCheckout }: OrderSummaryProps) {
+export function OrderSummary({ items, onRemoveItem, onClearOrder, onCheckout, onSaveOrder, isSavingOrder, selectedTable }: OrderSummaryProps) {
   // Use menuItem.price from the denormalized reference
   const subtotal = items.reduce((sum, item) => sum + (item.menuItem?.price || 0) * item.quantity, 0);
   const taxRate = 0.08; 
@@ -32,7 +35,7 @@ export function OrderSummary({ items, onRemoveItem, onClearOrder, onCheckout }: 
     <Card className="sticky top-20 shadow-lg">
       <CardHeader>
         <CardTitle className="text-xl">Current Order</CardTitle>
-        <CardDescription>Review your items before checkout.</CardDescription>
+        <CardDescription>{selectedTable ? `For Table ${selectedTable.number}` : 'Review your items before checkout.'}</CardDescription>
       </CardHeader>
       <CardContent>
         {items.length === 0 ? (
@@ -96,6 +99,21 @@ export function OrderSummary({ items, onRemoveItem, onClearOrder, onCheckout }: 
       </CardContent>
       {items.length > 0 && (
         <CardFooter className="flex-col space-y-2">
+           {selectedTable && onSaveOrder && (
+              <Button
+                  variant="secondary"
+                  className="w-full"
+                  onClick={onSaveOrder}
+                  disabled={isSavingOrder || items.length === 0}
+              >
+                  {isSavingOrder ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                  <Save className="mr-2 h-4 w-4" />
+                  )}
+                  {isSavingOrder ? 'Saving...' : 'Save Order to Table'}
+              </Button>
+           )}
            <div className="grid grid-cols-2 gap-2 w-full">
             <Button variant="outline" onClick={() => {/* Implement split bill */}}>
               <DivideSquare className="mr-2 h-4 w-4" /> Split Bill
@@ -107,7 +125,7 @@ export function OrderSummary({ items, onRemoveItem, onClearOrder, onCheckout }: 
           <Button 
             className="w-full bg-accent text-accent-foreground hover:bg-accent/90" 
             onClick={() => paymentMethod && onCheckout(paymentMethod)}
-            disabled={!paymentMethod}
+            disabled={!paymentMethod || items.length === 0}
           >
             <CreditCard className="mr-2 h-4 w-4" /> Checkout
           </Button>
@@ -119,5 +137,3 @@ export function OrderSummary({ items, onRemoveItem, onClearOrder, onCheckout }: 
     </Card>
   );
 }
-
-    

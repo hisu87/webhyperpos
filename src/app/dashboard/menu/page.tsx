@@ -5,14 +5,14 @@ import React, { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { MenuItemCard } from '@/components/menu/MenuItemCard';
 import { OrderSummary } from '@/components/menu/OrderSummary';
-import type { Menu, MenuItem as NewMenuItemType, OrderItem as NewOrderItemType } from '@/lib/types';
+import type { Menu, MenuItem as NewMenuItemType, Order, OrderItem as NewOrderItemType, User as AppUser } from '@/lib/types';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Search, Loader2, AlertTriangle } from 'lucide-react';
+import { Search, Loader2, AlertTriangle, Save } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
-import { initializeFirebaseClient, db as getDbInstance } from '@/lib/firebase';
-import type { Firestore } from 'firebase/firestore';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { initializeFirebaseClient, db as getDbInstance, auth as getAuthInstance } from '@/lib/firebase';
+import type { User as FirebaseUser } from 'firebase/auth';
+import { collection, query, where, onSnapshot, doc, writeBatch, Timestamp, limit } from 'firebase/firestore';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 export default function MenuPage() {
@@ -21,14 +21,20 @@ export default function MenuPage() {
   const [activeMenu, setActiveMenu] = useState<Menu | null>(null);
   const [menuItems, setMenuItems] = useState<NewMenuItemType[]>([]);
   const [isLoadingMenu, setIsLoadingMenu] = useState(true);
+  const [isSavingOrder, setIsSavingOrder] = useState(false);
   const [menuError, setMenuError] = useState<string | null>(null);
   const { toast } = useToast();
+  const router = useRouter();
 
   const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
   const [firebaseInitialized, setFirebaseInitialized] = useState(false);
   
   const searchParams = useSearchParams();
   const [selectedTable, setSelectedTable] = useState<{id: string; number: string} | null>(null);
+  
+  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
+  const [userProfile, setUserProfile] = useState<AppUser | null>(null);
+
 
   useEffect(() => {
     const tableId = searchParams.get('tableId');
@@ -48,6 +54,44 @@ export default function MenuPage() {
       setIsLoadingMenu(false);
     }
   }, []);
+  
+  useEffect(() => {
+    if (!firebaseInitialized) return;
+    const auth = getAuthInstance();
+    if (!auth) return;
+
+    const unsubscribeAuth = auth.onAuthStateChanged(user => {
+        setCurrentUser(user);
+    });
+
+    return () => unsubscribeAuth();
+  }, [firebaseInitialized]);
+
+  useEffect(() => {
+      if (!firebaseInitialized || !currentUser) {
+          setUserProfile(null);
+          return;
+      }
+      const db = getDbInstance();
+      if (!db) return;
+
+      const userQuery = query(collection(db, 'users'), where('firebaseUid', '==', currentUser.uid), limit(1));
+      const unsubscribeProfile = onSnapshot(userQuery, (snapshot) => {
+          if (!snapshot.empty) {
+              const userDoc = snapshot.docs[0];
+              setUserProfile({ id: userDoc.id, ...userDoc.data() } as AppUser);
+          } else {
+              console.warn("No profile found for current user");
+              setUserProfile(null);
+          }
+      }, (error) => {
+          console.error("Error fetching user profile:", error);
+          toast({ title: "Error", description: "Could not fetch user profile.", variant: "destructive" });
+      });
+
+      return () => unsubscribeProfile();
+  }, [currentUser, firebaseInitialized, toast]);
+
 
   useEffect(() => {
     if (!firebaseInitialized) return;
@@ -162,6 +206,94 @@ export default function MenuPage() {
     toast({ title: "Order Cleared", description: "All items have been removed from the order." });
   };
 
+  const handleSaveOrder = async () => {
+    if (!selectedTable) {
+        toast({ title: "No Table Selected", description: "Please select a table to save the order.", variant: "destructive" });
+        return;
+    }
+    if (orderItems.length === 0) {
+        toast({ title: "Empty Order", description: "Cannot save an empty order.", variant: "destructive" });
+        return;
+    }
+    if (!userProfile) {
+        toast({ title: "User Not Found", description: "Could not identify the current user. Please try again.", variant: "destructive" });
+        return;
+    }
+     if (!selectedTenantId || !activeMenu?.tenant?.name) {
+        toast({ title: "Tenant Not Found", description: "Could not identify the current tenant.", variant: "destructive" });
+        return;
+    }
+    const branchId = localStorage.getItem('selectedBranchId');
+    const branchName = localStorage.getItem('selectedBranchName');
+    if (!branchId || !branchName) {
+        toast({ title: "Branch Error", description: "Could not identify the current branch.", variant: "destructive" });
+        return;
+    }
+    
+    setIsSavingOrder(true);
+    const db = getDbInstance();
+    if (!db) {
+        toast({ title: "Database Error", description: "Could not connect to the database.", variant: "destructive" });
+        setIsSavingOrder(false);
+        return;
+    }
+
+    const batch = writeBatch(db);
+
+    const orderRef = doc(collection(db, "branches", branchId, "orders"));
+    const subtotal = orderItems.reduce((sum, item) => sum + (item.menuItem?.price || 0) * item.quantity, 0);
+
+    const newOrder: Order = {
+        id: orderRef.id,
+        orderNumber: `ORD-${orderRef.id.slice(0, 6).toUpperCase()}`,
+        status: 'open',
+        type: 'dine-in',
+        totalAmount: subtotal,
+        finalAmount: subtotal,
+        user: { id: userProfile.id, username: userProfile.username || userProfile.email },
+        table: { id: selectedTable.id, tableNumber: selectedTable.number },
+        tenant: { id: selectedTenantId, name: activeMenu.tenant.name },
+        branch: { id: branchId, name: branchName },
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+    };
+    batch.set(orderRef, newOrder);
+
+    for (const item of orderItems) {
+        const orderItemRef = doc(collection(db, "branches", branchId, "orders", orderRef.id, "items"));
+        const firestoreOrderItem: Omit<NewOrderItemType, 'id'> = {
+            menuItem: item.menuItem,
+            quantity: item.quantity,
+            note: item.note,
+            createdAt: Timestamp.now(),
+            updatedAt: Timestamp.now(),
+        };
+        batch.set(orderItemRef, firestoreOrderItem);
+    }
+
+    const tableRef = doc(db, "branches", branchId, "tables", selectedTable.id);
+    batch.update(tableRef, {
+        status: 'occupied',
+        currentOrder: { id: orderRef.id, orderNumber: newOrder.orderNumber },
+        updatedAt: Timestamp.now()
+    });
+
+    try {
+        await batch.commit();
+        toast({
+            title: "Order Saved!",
+            description: `Order ${newOrder.orderNumber} has been saved to Table ${selectedTable.number}.`,
+        });
+        setOrderItems([]);
+        router.push('/dashboard/tables');
+    } catch (error) {
+        console.error("Error saving order:", error);
+        toast({ title: "Save Failed", description: "Could not save the order to the table.", variant: "destructive" });
+    } finally {
+        setIsSavingOrder(false);
+    }
+  };
+
   const handleCheckout = (paymentMethod: string) => {
     if (orderItems.length === 0) {
       toast({ title: "Empty Order", description: "Cannot checkout an empty order.", variant: "destructive" });
@@ -184,7 +316,6 @@ export default function MenuPage() {
         description: `${checkoutMessage} Total: $${orderTotalWithTax.toFixed(2)}`
     });
     setOrderItems([]);
-    // Potentially navigate away or clear the selected table after checkout
   };
 
   const categories = Array.from(new Set(menuItems.map(item => item.category))).sort();
@@ -302,6 +433,9 @@ export default function MenuPage() {
           onRemoveItem={handleRemoveItem} 
           onClearOrder={handleClearOrder}
           onCheckout={handleCheckout} 
+          onSaveOrder={handleSaveOrder}
+          isSavingOrder={isSavingOrder}
+          selectedTable={selectedTable}
         />
       </div>
     </div>

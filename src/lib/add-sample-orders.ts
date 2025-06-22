@@ -166,10 +166,15 @@ async function addSampleOrders() {
                     id: orderItemRef.id,
                     menuItem: denormalizedMenuItem,
                     quantity: quantity,
-                    note: Math.random() > 0.7 ? 'Extra hot' : undefined,
                     createdAt: Timestamp.now(),
                     updatedAt: Timestamp.now(),
                 };
+
+                // Conditionally add a note to avoid 'undefined'
+                if (Math.random() > 0.7) {
+                    orderItem.note = 'Extra hot';
+                }
+
                 batch.set(orderItemRef, orderItem);
                 totalAmount += menuItem.price * quantity;
             }

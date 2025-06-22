@@ -2,7 +2,7 @@
 import type { Tenant, Branch, MenuItem as NewMenuItemType, CafeTable, ShiftReport as NewShiftReportType } from './types';
 import { LayoutGrid, ShoppingBag, Users, BarChart3, TrendingUp, Settings, FileText, Bot } from 'lucide-react';
 
-export const APP_NAME = 'CoffeeOS';
+export const APP_NAME = 'Hyper POS';
 
 export const NAV_LINKS = [
   { href: '/dashboard/menu', label: 'Order & Menu', icon: ShoppingBag },

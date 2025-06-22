@@ -30,6 +30,7 @@ import { Bell, LogOut, UserCircle, Settings, HelpCircle, Loader2 } from 'lucide-
 import { Logo } from '@/components/icons/Logo';
 import { NAV_LINKS } from '@/lib/constants';
 import { NavLink } from './NavLink';
+import { Separator } from '@/components/ui/separator';
 
 const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
 
@@ -40,6 +41,16 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const [isLoadingUser, setIsLoadingUser] = useState(true);
   const [firebaseInitialized, setFirebaseInitialized] = useState(false);
   const [isLoadingFirebase, setIsLoadingFirebase] = useState(true); // For initial Firebase init
+  const [tenantName, setTenantName] = useState<string | null>(null);
+  const [branchName, setBranchName] = useState<string | null>(null);
+
+  useEffect(() => {
+    // This new useEffect will fetch the names from local storage
+    if (typeof window !== 'undefined') {
+      setTenantName(localStorage.getItem('selectedTenantName'));
+      setBranchName(localStorage.getItem('selectedBranchName'));
+    }
+  }, [pathname]); // Re-run when path changes, e.g., navigating back to selection screen
 
   useEffect(() => {
     // Initialize Firebase client-side
@@ -135,7 +146,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     return (
       <div className="flex h-screen items-center justify-center bg-background">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
-        <p className="ml-4 text-lg text-foreground">Loading CoffeeOS...</p>
+        <p className="ml-4 text-lg text-foreground">Loading Hyper POS...</p>
       </div>
     );
   }
@@ -192,8 +203,13 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         <header className="sticky top-0 z-40 flex h-16 items-center justify-between border-b bg-background/80 px-4 backdrop-blur-md md:px-6">
           <div className="flex items-center gap-4">
             <SidebarTrigger className="md:hidden" />
-            <div className="hidden md:block">
+            <div className="hidden items-center gap-4 md:flex">
               <Logo iconSize={28}/>
+              {(tenantName || branchName) && <Separator orientation="vertical" className="h-6" />}
+              <div>
+                {tenantName && <div className="text-sm font-semibold text-foreground">{tenantName}</div>}
+                {branchName && <div className="text-xs text-muted-foreground">{branchName}</div>}
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-4">
@@ -235,7 +251,7 @@ function UserMenu({ user }: { user: FirebaseUser | null }) {
     if (auth) {
       auth.signOut().then(() => {
         try {
-          localStorage.removeItem('loginTimestamp');
+          localStorage.clear(); // Clear all local storage on logout
         } catch (e) {
           console.warn('localStorage not available during logout.');
         }
@@ -299,4 +315,3 @@ function UserMenu({ user }: { user: FirebaseUser | null }) {
     </DropdownMenu>
   );
 }
-

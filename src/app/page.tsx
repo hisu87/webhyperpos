@@ -72,6 +72,9 @@ export default function TenantBranchSelectionPage() {
   const [isLoadingBranches, setIsLoadingBranches] = useState<boolean>(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
+  const selectedTenant = tenantsData.find(t => t.id === selectedTenantId);
+  const selectedBranch = branchesData.find(b => b.id === selectedBranchId);
+
   useEffect(() => {
     try {
         initializeFirebaseClient();
@@ -451,6 +454,8 @@ export default function TenantBranchSelectionPage() {
             onClick={() => {
               if (selectedTenantId) localStorage.setItem('selectedTenantId', selectedTenantId);
               if (selectedBranchId) localStorage.setItem('selectedBranchId', selectedBranchId);
+              if (selectedTenant) localStorage.setItem('selectedTenantName', selectedTenant.name);
+              if (selectedBranch) localStorage.setItem('selectedBranchName', selectedBranch.name);
             }}
           >
             <Link href="/dashboard/menu">
@@ -467,4 +472,3 @@ export default function TenantBranchSelectionPage() {
     </div>
   );
 }
-

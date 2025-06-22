@@ -261,13 +261,20 @@ export default function MenuPage() {
 
     for (const item of orderItems) {
         const orderItemRef = doc(collection(db, "branches", branchId, "orders", orderRef.id, "items"));
-        const firestoreOrderItem: Omit<NewOrderItemType, 'id'> = {
+        
+        // Define the type to allow for the optional 'note' property
+        const firestoreOrderItem: Omit<NewOrderItemType, 'id'> & { note?: string } = {
             menuItem: item.menuItem,
             quantity: item.quantity,
-            note: item.note,
             createdAt: Timestamp.now(),
             updatedAt: Timestamp.now(),
         };
+
+        // Conditionally add the note if it exists to avoid 'undefined'
+        if (item.note) {
+            firestoreOrderItem.note = item.note;
+        }
+        
         batch.set(orderItemRef, firestoreOrderItem);
     }
 

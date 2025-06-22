@@ -9,9 +9,8 @@ import { Input } from '@/components/ui/input';
 import { Search, PlusCircle, Loader2, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from "@/hooks/use-toast";
-import { initializeFirebaseClient, db as getDbInstance } from '@/lib/firebase'; // Updated import
-import type { Firestore } from 'firebase/firestore';
-import { collection, query, onSnapshot, orderBy } from 'firebase/firestore';
+import { initializeFirebaseClient, db as getDbInstance } from '@/lib/firebase';
+import { collection, query, onSnapshot, orderBy, doc, updateDoc, Timestamp } from 'firebase/firestore';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 export default function TablesPage() {
@@ -75,8 +74,6 @@ export default function TablesPage() {
         return {
           id: doc.id,
           ...data,
-          // Ensure branch ref is correctly typed if TableCard expects it
-          // This should already be part of table doc as per schema
           branch: data.branch || { id: selectedBranchId, name: 'Unknown Branch'},
         } as TableType;
       });
@@ -91,9 +88,39 @@ export default function TablesPage() {
     return () => unsubscribe();
   }, [selectedBranchId, firebaseInitialized]);
 
-  const handleSelectTable = (tableId: string) => {
-    const table = tables.find(t => t.id === tableId);
-    toast({ title: `Table ${table?.tableNumber} Selected`, description: `Status: ${table?.status}` });
+  const handleUpdateTableStatus = async (tableId: string, newStatus: 'available' | 'cleaning') => {
+    if (!selectedBranchId) {
+        toast({ title: "Error", description: "No branch selected.", variant: "destructive"});
+        return;
+    }
+    const db = getDbInstance();
+    if (!db) {
+        toast({ title: "Error", description: "Database service not available.", variant: "destructive"});
+        return;
+    }
+
+    const tableRef = doc(db, "branches", selectedBranchId, "tables", tableId);
+    
+    try {
+        const updatePayload: any = {
+            status: newStatus,
+            updatedAt: Timestamp.now()
+        };
+        
+        const currentTable = tables.find(t => t.id === tableId);
+        if(currentTable?.status === 'occupied' && newStatus !== 'occupied') {
+             updatePayload.currentOrder = null;
+        }
+        if(currentTable?.status === 'reserved' && newStatus !== 'reserved') {
+             updatePayload.reservationDetails = null;
+        }
+        
+        await updateDoc(tableRef, updatePayload);
+        toast({ title: "Status Updated", description: `Table status changed to ${newStatus}.` });
+    } catch (error) {
+        console.error("Error updating table status:", error);
+        toast({ title: "Update Failed", description: "Could not update table status.", variant: "destructive"});
+    }
   };
 
   const areas = Array.from(new Set(tables.map(table => table.zone || 'Default Area'))).sort();
@@ -162,7 +189,7 @@ export default function TablesPage() {
             <TabsContent value="all" className="mt-0">
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                 {filteredTables.map((table) => (
-                  <TableCard key={table.id} table={table} onSelectTable={handleSelectTable} />
+                  <TableCard key={table.id} table={table} onUpdateStatus={handleUpdateTableStatus} />
                 ))}
               </div>
             </TabsContent>
@@ -170,7 +197,7 @@ export default function TablesPage() {
               <TabsContent key={area} value={area} className="mt-0">
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                   {filteredTables.filter(table => (table.zone || 'Default Area') === area).map((table) => (
-                    <TableCard key={table.id} table={table} onSelectTable={handleSelectTable} />
+                    <TableCard key={table.id} table={table} onUpdateStatus={handleUpdateTableStatus} />
                   ))}
                 </div>
               </TabsContent>
@@ -186,5 +213,3 @@ export default function TablesPage() {
     </div>
   );
 }
-
-    

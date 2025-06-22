@@ -2,6 +2,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { MenuItemCard } from '@/components/menu/MenuItemCard';
 import { OrderSummary } from '@/components/menu/OrderSummary';
 import type { Menu, MenuItem as NewMenuItemType, OrderItem as NewOrderItemType } from '@/lib/types';
@@ -9,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Search, Loader2, AlertTriangle } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
-import { initializeFirebaseClient, db as getDbInstance } from '@/lib/firebase'; // Updated import
+import { initializeFirebaseClient, db as getDbInstance } from '@/lib/firebase';
 import type { Firestore } from 'firebase/firestore';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -25,6 +26,17 @@ export default function MenuPage() {
 
   const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
   const [firebaseInitialized, setFirebaseInitialized] = useState(false);
+  
+  const searchParams = useSearchParams();
+  const [selectedTable, setSelectedTable] = useState<{id: string; number: string} | null>(null);
+
+  useEffect(() => {
+    const tableId = searchParams.get('tableId');
+    const tableNumber = searchParams.get('tableNumber');
+    if (tableId && tableNumber) {
+        setSelectedTable({ id: tableId, number: tableNumber });
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     try {
@@ -52,7 +64,6 @@ export default function MenuPage() {
   useEffect(() => {
     if (!selectedTenantId || !firebaseInitialized) {
       if(firebaseInitialized && !selectedTenantId && !localStorage.getItem('selectedTenantId')) {
-         // Only set error if firebase is init and tenantId is confirmed missing
          setMenuError("Tenant ID not available for menu loading.");
       }
       setIsLoadingMenu(false);
@@ -93,8 +104,6 @@ export default function MenuPage() {
         const fetchedItems: NewMenuItemType[] = itemsSnapshot.docs.map(itemDoc => ({
           id: itemDoc.id,
           ...itemDoc.data(),
-          // Ensure denormalized menu ref is present if your MenuItemCard expects it
-          // This might already be handled if your 'items' subcollection documents store this
           menu: menuData ? { id: menuData.id, name: menuData.name } : { id: '', name: ''}
         } as NewMenuItemType));
         setMenuItems(fetchedItems);
@@ -130,7 +139,7 @@ export default function MenuPage() {
       } else {
         const newOrderItem: NewOrderItemType = {
           id: `${item.id}-${Date.now()}`, 
-          menuItem: { // Denormalized reference
+          menuItem: {
              id: item.id, 
              name: item.name, 
              price: item.price, 
@@ -158,13 +167,24 @@ export default function MenuPage() {
       toast({ title: "Empty Order", description: "Cannot checkout an empty order.", variant: "destructive" });
       return;
     }
-    console.log('Checking out with:', paymentMethod, orderItems);
+    
+    let checkoutMessage = `Paid with ${paymentMethod}.`;
+    if (selectedTable) {
+        console.log(`This order should be associated with Table ID: ${selectedTable.id}`);
+        checkoutMessage += ` Order for Table ${selectedTable.number}.`;
+        // In a real implementation, you would trigger a Firestore transaction here to:
+        // 1. Create the new Order document.
+        // 2. Add OrderItems to its subcollection.
+        // 3. Update the CafeTable document's status to 'occupied' and link it to the new Order.
+    }
+
     const orderTotalWithTax = orderItems.reduce((sum, item) => sum + (item.menuItem?.price || 0) * item.quantity, 0) * 1.08; 
     toast({ 
         title: "Checkout Successful!", 
-        description: `Paid with ${paymentMethod}. Order total: $${orderTotalWithTax.toFixed(2)}`
+        description: `${checkoutMessage} Total: $${orderTotalWithTax.toFixed(2)}`
     });
     setOrderItems([]);
+    // Potentially navigate away or clear the selected table after checkout
   };
 
   const categories = Array.from(new Set(menuItems.map(item => item.category))).sort();
@@ -209,6 +229,11 @@ export default function MenuPage() {
   return (
     <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-theme(spacing.24))]">
       <div className="lg:w-3/4 flex flex-col">
+        {selectedTable && (
+            <div className="p-3 mb-4 bg-accent text-accent-foreground rounded-lg shadow text-center font-semibold">
+                Creating Order for Table {selectedTable.number}
+            </div>
+        )}
         <div className="p-4 bg-card rounded-lg shadow mb-4 sticky top-0 z-10">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />

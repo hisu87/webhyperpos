@@ -141,6 +141,12 @@ export interface CafeTable { // Represents items in /branches/{branchId}/tables/
   branch: DenormalizedBranchRef; // Thêm reference tới branch
   createdAt: any; // Timestamp
   updatedAt: any; // Timestamp
+  reservationDetails?: {
+    guestName: string;
+    guestPhone?: string;
+    reservationTime: any; // Timestamp
+    notes?: string;
+  };
 }
 
 

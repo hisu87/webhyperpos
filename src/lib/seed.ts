@@ -215,7 +215,7 @@ async function seedDatabase() {
                 const tablesForBranch: Omit<CafeTable, 'id' | 'branch' | 'createdAt' | 'updatedAt'>[] = [
                     { tableNumber: 'A1', zone: 'Indoors', status: 'available', capacity: 2, isActive: true },
                     { tableNumber: 'A2', zone: 'Indoors', status: 'occupied', currentOrder: { id: `dummy-order-${branchDoc.id}-A2`, orderNumber: `ORD-${branchDoc.id.slice(0,3)}-A2` }, capacity: 4, isActive: true },
-                    { tableNumber: 'B1', zone: 'Patio', status: 'reserved', capacity: 4, isActive: true },
+                    { tableNumber: 'B1', zone: 'Patio', status: 'reserved', capacity: 4, isActive: true, reservationDetails: { guestName: 'Jane Doe', guestPhone: '555-5678', reservationTime: Timestamp.fromDate(new Date(Date.now() + 2 * 60 * 60 * 1000)), notes: 'Celebrating an anniversary.' } },
                     { tableNumber: 'B2', zone: 'Patio', status: 'cleaning', capacity: 2, isActive: true },
                     { tableNumber: 'C1', zone: 'Bar', status: 'available', capacity: 1, isActive: false }, // Inactive table
                 ];

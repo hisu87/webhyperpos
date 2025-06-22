@@ -2,12 +2,12 @@
 'use client';
 
 import * as React from 'react'; 
-import type { OrderItem as NewOrderItemType } from '@/lib/types'; // Updated type name to match usage
+import type { OrderItem as NewOrderItemType } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
-import { Trash2, CreditCard, DivideSquare, Percent, Save, Loader2 } from 'lucide-react';
+import { Trash2, CreditCard, DivideSquare, Percent, Save, Loader2, Edit } from 'lucide-react';
 import { PAYMENT_METHODS } from '@/lib/constants';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
@@ -17,13 +17,13 @@ interface OrderSummaryProps {
   onRemoveItem: (itemId: string) => void;
   onClearOrder: () => void;
   onCheckout: (paymentMethod: string) => void;
-  onSaveOrder?: () => void; // Optional save handler
+  onSaveOrder?: () => void;
   isSavingOrder?: boolean;
   selectedTable?: {id: string; number: string} | null;
+  isEditing?: boolean;
 }
 
-export function OrderSummary({ items, onRemoveItem, onClearOrder, onCheckout, onSaveOrder, isSavingOrder, selectedTable }: OrderSummaryProps) {
-  // Use menuItem.price from the denormalized reference
+export function OrderSummary({ items, onRemoveItem, onClearOrder, onCheckout, onSaveOrder, isSavingOrder, selectedTable, isEditing }: OrderSummaryProps) {
   const subtotal = items.reduce((sum, item) => sum + (item.menuItem?.price || 0) * item.quantity, 0);
   const taxRate = 0.08; 
   const tax = subtotal * taxRate;
@@ -34,7 +34,7 @@ export function OrderSummary({ items, onRemoveItem, onClearOrder, onCheckout, on
   return (
     <Card className="sticky top-20 shadow-lg">
       <CardHeader>
-        <CardTitle className="text-xl">Current Order</CardTitle>
+        <CardTitle className="text-xl">{isEditing ? "Edit Order" : "Current Order"}</CardTitle>
         <CardDescription>{selectedTable ? `For Table ${selectedTable.number}` : 'Review your items before checkout.'}</CardDescription>
       </CardHeader>
       <CardContent>
@@ -46,8 +46,8 @@ export function OrderSummary({ items, onRemoveItem, onClearOrder, onCheckout, on
               {items.map((item) => (
                 <li key={item.id} className="flex items-center justify-between">
                   <div>
-                    {/* Use menuItem.name and menuItem.price */}
                     <p className="font-medium">{item.menuItem?.name || 'Unknown Item'} <span className="text-xs text-muted-foreground">x{item.quantity}</span></p>
+                    {item.note && <p className="text-xs text-muted-foreground italic">Note: {item.note}</p>}
                     <p className="text-sm text-muted-foreground">${(item.menuItem?.price || 0).toFixed(2)} each</p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -99,7 +99,7 @@ export function OrderSummary({ items, onRemoveItem, onClearOrder, onCheckout, on
       </CardContent>
       {items.length > 0 && (
         <CardFooter className="flex-col space-y-2">
-           {selectedTable && onSaveOrder && (
+           {(selectedTable || isEditing) && onSaveOrder && (
               <Button
                   variant="secondary"
                   className="w-full"
@@ -109,9 +109,9 @@ export function OrderSummary({ items, onRemoveItem, onClearOrder, onCheckout, on
                   {isSavingOrder ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : (
-                  <Save className="mr-2 h-4 w-4" />
+                    isEditing ? <Edit className="mr-2 h-4 w-4" /> : <Save className="mr-2 h-4 w-4" />
                   )}
-                  {isSavingOrder ? 'Saving...' : 'Save Order to Table'}
+                  {isSavingOrder ? (isEditing ? 'Updating...' : 'Saving...') : (isEditing ? 'Update Order' : 'Save Order to Table')}
               </Button>
            )}
            <div className="grid grid-cols-2 gap-2 w-full">

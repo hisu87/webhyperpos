@@ -8,11 +8,11 @@ import { OrderSummary } from '@/components/menu/OrderSummary';
 import type { Menu, MenuItem as NewMenuItemType, Order, OrderItem as NewOrderItemType, User as AppUser } from '@/lib/types';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Search, Loader2, AlertTriangle, Save } from 'lucide-react';
+import { Search, Loader2, AlertTriangle, Save, Edit } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 import { initializeFirebaseClient, db as getDbInstance, auth as getAuthInstance } from '@/lib/firebase';
 import type { User as FirebaseUser } from 'firebase/auth';
-import { collection, query, where, onSnapshot, doc, writeBatch, Timestamp, limit } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, writeBatch, Timestamp, limit, getDoc, getDocs, deleteDoc } from 'firebase/firestore';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 export default function MenuPage() {
@@ -20,9 +20,9 @@ export default function MenuPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeMenu, setActiveMenu] = useState<Menu | null>(null);
   const [menuItems, setMenuItems] = useState<NewMenuItemType[]>([]);
-  const [isLoadingMenu, setIsLoadingMenu] = useState(true);
+  const [isLoading, setIsLoading] = useState(true);
   const [isSavingOrder, setIsSavingOrder] = useState(false);
-  const [menuError, setMenuError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
   const router = useRouter();
 
@@ -31,16 +31,23 @@ export default function MenuPage() {
   
   const searchParams = useSearchParams();
   const [selectedTable, setSelectedTable] = useState<{id: string; number: string} | null>(null);
+  const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
   
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [userProfile, setUserProfile] = useState<AppUser | null>(null);
 
 
+  // Effect to handle initial setup from URL params
   useEffect(() => {
     const tableId = searchParams.get('tableId');
     const tableNumber = searchParams.get('tableNumber');
+    const orderIdToEdit = searchParams.get('orderId');
+
     if (tableId && tableNumber) {
         setSelectedTable({ id: tableId, number: tableNumber });
+    }
+    if (orderIdToEdit) {
+        setEditingOrderId(orderIdToEdit);
     }
   }, [searchParams]);
 
@@ -50,8 +57,8 @@ export default function MenuPage() {
       setFirebaseInitialized(true);
     } catch (e) {
       console.error("Error initializing Firebase in MenuPage:", e);
-      setMenuError("Failed to initialize core services. Please refresh.");
-      setIsLoadingMenu(false);
+      setError("Failed to initialize core services. Please refresh.");
+      setIsLoading(false);
     }
   }, []);
   
@@ -100,29 +107,30 @@ export default function MenuPage() {
     if (storedTenantId) {
       setSelectedTenantId(storedTenantId);
     } else {
-      setMenuError("Tenant ID not found. Please select a tenant first.");
-      setIsLoadingMenu(false);
+      setError("Tenant ID not found. Please select a tenant first.");
+      setIsLoading(false);
     }
   }, [firebaseInitialized]);
 
+  // Effect to load menu
   useEffect(() => {
     if (!selectedTenantId || !firebaseInitialized) {
       if(firebaseInitialized && !selectedTenantId && !localStorage.getItem('selectedTenantId')) {
-         setMenuError("Tenant ID not available for menu loading.");
+         setError("Tenant ID not available for menu loading.");
       }
-      setIsLoadingMenu(false);
+      setIsLoading(false);
       return;
     }
 
     const db = getDbInstance();
     if (!db) {
-      setMenuError("Database service not available.");
-      setIsLoadingMenu(false);
+      setError("Database service not available.");
+      setIsLoading(false);
       return;
     }
 
-    setIsLoadingMenu(true);
-    setMenuError(null);
+    setIsLoading(true);
+    setError(null);
 
     const menusQuery = query(
       collection(db, "menus"),
@@ -132,10 +140,10 @@ export default function MenuPage() {
 
     const unsubscribeMenu = onSnapshot(menusQuery, async (snapshot) => {
       if (snapshot.empty) {
-        setMenuError("No active menu found for this tenant.");
+        setError("No active menu found for this tenant.");
         setActiveMenu(null);
         setMenuItems([]);
-        setIsLoadingMenu(false);
+        setIsLoading(false);
         return;
       }
       
@@ -151,30 +159,61 @@ export default function MenuPage() {
           menu: menuData ? { id: menuData.id, name: menuData.name } : { id: '', name: ''}
         } as NewMenuItemType));
         setMenuItems(fetchedItems);
-        setIsLoadingMenu(false);
+        // Loading is set to false in the edit order effect if applicable
+        if (!editingOrderId) {
+            setIsLoading(false);
+        }
       }, (error) => {
         console.error("Error fetching menu items:", error);
-        setMenuError("Failed to load menu items.");
-        setIsLoadingMenu(false);
+        setError("Failed to load menu items.");
+        setIsLoading(false);
       });
       return () => unsubscribeItems();
 
     }, (error) => {
       console.error("Error fetching active menu:", error);
-      setMenuError("Failed to load active menu.");
+      setError("Failed to load active menu.");
       setActiveMenu(null);
       setMenuItems([]);
-      setIsLoadingMenu(false);
+      setIsLoading(false);
     });
 
     return () => unsubscribeMenu();
-  }, [selectedTenantId, firebaseInitialized]);
+  }, [selectedTenantId, firebaseInitialized, editingOrderId]);
+
+  // Effect to load an existing order for editing
+  useEffect(() => {
+    if (!editingOrderId || !firebaseInitialized) {
+        return;
+    }
+    const db = getDbInstance();
+    const branchId = localStorage.getItem('selectedBranchId');
+
+    if (!db || !branchId) {
+        setError("Cannot edit order: missing context (db or branchId).");
+        setIsLoading(false);
+        return;
+    }
+    
+    setIsLoading(true);
+    const orderItemsRef = collection(db, "branches", branchId, "orders", editingOrderId, "items");
+    getDocs(orderItemsRef).then(snapshot => {
+        const existingItems = snapshot.docs.map(doc => doc.data() as NewOrderItemType);
+        setOrderItems(existingItems);
+        setIsLoading(false);
+    }).catch(err => {
+        console.error("Error loading order items for editing:", err);
+        setError("Failed to load the order to be edited.");
+        setIsLoading(false);
+    });
+
+  }, [editingOrderId, firebaseInitialized]);
 
   const handleAddToCart = (item: NewMenuItemType, quantity: number, notes?: string) => {
     setOrderItems((prevItems) => {
-      const existingItemIndex = prevItems.findIndex((oi) => oi.menuItem?.id === item.id);
+      const existingItemIndex = prevItems.findIndex((oi) => oi.menuItem?.id === item.id && oi.note === (notes || undefined));
       if (quantity <= 0) {
-        return prevItems.filter((oi) => oi.menuItem?.id !== item.id);
+        return prevItems.filter((oi) => oi.menuItem?.id !== item.id || oi.note !== (notes || undefined));
       }
       if (existingItemIndex > -1) {
         const updatedItems = [...prevItems];
@@ -204,6 +243,81 @@ export default function MenuPage() {
   const handleClearOrder = () => {
     setOrderItems([]);
     toast({ title: "Order Cleared", description: "All items have been removed from the order." });
+  };
+
+  const handleSaveOrUpdateOrder = async () => {
+    if (editingOrderId) {
+        await handleUpdateOrder();
+    } else {
+        await handleSaveOrder();
+    }
+  };
+
+  const handleUpdateOrder = async () => {
+    if (!editingOrderId) return;
+    if (orderItems.length === 0) {
+        toast({ title: "Empty Order", description: "Cannot update to an empty order. Consider cancelling instead.", variant: "destructive" });
+        return;
+    }
+    const branchId = localStorage.getItem('selectedBranchId');
+    if (!branchId) {
+        toast({ title: "Branch Error", description: "Could not identify the current branch.", variant: "destructive" });
+        return;
+    }
+
+    setIsSavingOrder(true);
+    const db = getDbInstance();
+    if (!db) {
+        toast({ title: "Database Error", description: "Could not connect to the database.", variant: "destructive" });
+        setIsSavingOrder(false);
+        return;
+    }
+
+    const batch = writeBatch(db);
+    const orderRef = doc(db, "branches", branchId, "orders", editingOrderId);
+    const subtotal = orderItems.reduce((sum, item) => sum + (item.menuItem?.price || 0) * item.quantity, 0);
+
+    // 1. Delete existing items
+    const itemsCollectionRef = collection(db, "branches", branchId, "orders", editingOrderId, "items");
+    const existingItemsSnapshot = await getDocs(itemsCollectionRef);
+    existingItemsSnapshot.forEach(doc => batch.delete(doc.ref));
+
+    // 2. Add current items
+    for (const item of orderItems) {
+        const orderItemRef = doc(collection(db, "branches", branchId, "orders", editingOrderId, "items"));
+        const firestoreOrderItem: Omit<NewOrderItemType, 'id'> & { note?: string } = {
+            menuItem: item.menuItem,
+            quantity: item.quantity,
+            createdAt: Timestamp.now(), // Consider keeping original if available
+            updatedAt: Timestamp.now(),
+        };
+        if (item.note) {
+            firestoreOrderItem.note = item.note;
+        }
+        batch.set(orderItemRef, firestoreOrderItem);
+    }
+
+    // 3. Update order totals and timestamp
+    batch.update(orderRef, {
+        totalAmount: subtotal,
+        finalAmount: subtotal, // Add discounts/tax logic here if needed
+        updatedAt: Timestamp.now(),
+    });
+
+    try {
+        await batch.commit();
+        toast({
+            title: "Order Updated!",
+            description: `Order has been successfully updated.`,
+        });
+        setOrderItems([]);
+        router.push(`/dashboard/orders/${editingOrderId}`);
+    } catch (error) {
+        console.error("Error updating order:", error);
+        toast({ title: "Update Failed", description: "Could not update the order.", variant: "destructive" });
+    } finally {
+        setIsSavingOrder(false);
+    }
   };
 
   const handleSaveOrder = async () => {
@@ -262,7 +376,6 @@ export default function MenuPage() {
     for (const item of orderItems) {
         const orderItemRef = doc(collection(db, "branches", branchId, "orders", orderRef.id, "items"));
         
-        // Define the type to allow for the optional 'note' property
         const firestoreOrderItem: Omit<NewOrderItemType, 'id'> & { note?: string } = {
             menuItem: item.menuItem,
             quantity: item.quantity,
@@ -270,7 +383,6 @@ export default function MenuPage() {
             updatedAt: Timestamp.now(),
         };
 
-        // Conditionally add the note if it exists to avoid 'undefined'
         if (item.note) {
             firestoreOrderItem.note = item.note;
         }
@@ -302,6 +414,7 @@ export default function MenuPage() {
   };
 
   const handleCheckout = (paymentMethod: string) => {
+    // This function will need to be adapted for editing orders too
     if (orderItems.length === 0) {
       toast({ title: "Empty Order", description: "Cannot checkout an empty order.", variant: "destructive" });
       return;
@@ -309,12 +422,7 @@ export default function MenuPage() {
     
     let checkoutMessage = `Paid with ${paymentMethod}.`;
     if (selectedTable) {
-        console.log(`This order should be associated with Table ID: ${selectedTable.id}`);
         checkoutMessage += ` Order for Table ${selectedTable.number}.`;
-        // In a real implementation, you would trigger a Firestore transaction here to:
-        // 1. Create the new Order document.
-        // 2. Add OrderItems to its subcollection.
-        // 3. Update the CafeTable document's status to 'occupied' and link it to the new Order.
     }
 
     const orderTotalWithTax = orderItems.reduce((sum, item) => sum + (item.menuItem?.price || 0) * item.quantity, 0) * 1.08; 
@@ -323,6 +431,9 @@ export default function MenuPage() {
         description: `${checkoutMessage} Total: $${orderTotalWithTax.toFixed(2)}`
     });
     setOrderItems([]);
+    if (editingOrderId) {
+        router.push('/dashboard/tables');
+    }
   };
 
   const categories = Array.from(new Set(menuItems.map(item => item.category))).sort();
@@ -333,22 +444,22 @@ export default function MenuPage() {
     item.category.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
-  if (!firebaseInitialized || (isLoadingMenu && !menuError && selectedTenantId)) {
+  if (isLoading) {
     return (
       <div className="flex justify-center items-center h-full">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
-        <p className="ml-4 text-lg">Loading menu...</p>
+        <p className="ml-4 text-lg">{editingOrderId ? "Loading order for editing..." : "Loading menu..."}</p>
       </div>
     );
   }
 
-  if (menuError) {
+  if (error) {
     return (
       <div className="flex flex-col justify-center items-center h-full">
         <AlertTriangle className="h-12 w-12 text-destructive mb-4" />
         <Alert variant="destructive" className="max-w-md">
-          <AlertTitle>Error Loading Menu</AlertTitle>
-          <AlertDescription>{menuError}</AlertDescription>
+          <AlertTitle>Error</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
         </Alert>
       </div>
     );
@@ -367,7 +478,12 @@ export default function MenuPage() {
   return (
     <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-theme(spacing.24))]">
       <div className="lg:w-3/4 flex flex-col">
-        {selectedTable && (
+        {editingOrderId && (
+            <div className="p-3 mb-4 bg-accent text-accent-foreground rounded-lg shadow text-center font-semibold">
+                Editing Order for Table {selectedTable?.number || '...'}
+            </div>
+        )}
+        {selectedTable && !editingOrderId && (
             <div className="p-3 mb-4 bg-accent text-accent-foreground rounded-lg shadow text-center font-semibold">
                 Creating Order for Table {selectedTable.number}
             </div>
@@ -440,9 +556,10 @@ export default function MenuPage() {
           onRemoveItem={handleRemoveItem} 
           onClearOrder={handleClearOrder}
           onCheckout={handleCheckout} 
-          onSaveOrder={handleSaveOrder}
+          onSaveOrder={handleSaveOrUpdateOrder}
           isSavingOrder={isSavingOrder}
           selectedTable={selectedTable}
+          isEditing={!!editingOrderId}
         />
       </div>
     </div>

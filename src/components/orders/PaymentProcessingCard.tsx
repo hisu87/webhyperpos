@@ -1,3 +1,4 @@
+
 'use client';
 
 import * as React from 'react';
@@ -8,6 +9,7 @@ import { Separator } from '@/components/ui/separator';
 import { CreditCard, Percent, DivideSquare, Loader2 } from 'lucide-react';
 import { PAYMENT_METHODS } from '@/lib/constants';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 
 interface PaymentProcessingCardProps {
   order: OrderType;
@@ -65,12 +67,36 @@ export function PaymentProcessingCard({ order, items, onCompletePayment, isProce
             </Select>
         </div>
         <div className="grid grid-cols-2 gap-2 w-full pt-2">
-            <Button variant="outline" disabled>
-              <DivideSquare className="mr-2 h-4 w-4" /> Split Bill
-            </Button>
-            <Button variant="outline" disabled>
-              <Percent className="mr-2 h-4 w-4" /> Apply Discount
-            </Button>
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button variant="outline">
+                  <DivideSquare className="mr-2 h-4 w-4" /> Split Bill
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Split Bill</DialogTitle>
+                  <DialogDescription>
+                    This feature is not yet implemented. You will soon be able to split the bill for payment processing.
+                  </DialogDescription>
+                </DialogHeader>
+              </DialogContent>
+            </Dialog>
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button variant="outline">
+                  <Percent className="mr-2 h-4 w-4" /> Apply Discount
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Apply Discount</DialogTitle>
+                  <DialogDescription>
+                    This feature is not yet implemented. You will soon be able to apply discounts before finalizing payment.
+                  </DialogDescription>
+                </DialogHeader>
+              </DialogContent>
+            </Dialog>
         </div>
       </CardContent>
       <CardFooter>

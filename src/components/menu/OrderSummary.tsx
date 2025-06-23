@@ -10,6 +10,7 @@ import { Separator } from '@/components/ui/separator';
 import { Trash2, CreditCard, DivideSquare, Percent, Save, Loader2, Edit } from 'lucide-react';
 import { PAYMENT_METHODS } from '@/lib/constants';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 
 
 interface OrderSummaryProps {
@@ -115,12 +116,36 @@ export function OrderSummary({ items, onRemoveItem, onClearOrder, onCheckout, on
               </Button>
            )}
            <div className="grid grid-cols-2 gap-2 w-full">
-            <Button variant="outline" onClick={() => {/* Implement split bill */}}>
-              <DivideSquare className="mr-2 h-4 w-4" /> Split Bill
-            </Button>
-            <Button variant="outline" onClick={() => {/* Implement discount */}}>
-              <Percent className="mr-2 h-4 w-4" /> Apply Discount
-            </Button>
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button variant="outline">
+                  <DivideSquare className="mr-2 h-4 w-4" /> Split Bill
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Split Bill</DialogTitle>
+                  <DialogDescription>
+                    This feature is not yet implemented. In the future, you will be able to split the bill by item or amount here.
+                  </DialogDescription>
+                </DialogHeader>
+              </DialogContent>
+            </Dialog>
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button variant="outline">
+                  <Percent className="mr-2 h-4 w-4" /> Apply Discount
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Apply Discount</DialogTitle>
+                  <DialogDescription>
+                    This feature is not yet implemented. In the future, you will be able to apply promotions or manual discounts here.
+                  </DialogDescription>
+                </DialogHeader>
+              </DialogContent>
+            </Dialog>
           </div>
           <Button 
             className="w-full bg-accent text-accent-foreground hover:bg-accent/90" 

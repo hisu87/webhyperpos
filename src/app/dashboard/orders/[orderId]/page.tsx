@@ -3,7 +3,7 @@
 
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { doc, onSnapshot, DocumentData, collection } from 'firebase/firestore';
+import { doc, onSnapshot, DocumentData, collection, writeBatch, Timestamp } from 'firebase/firestore';
 import { initializeFirebaseClient, db as getDbInstance } from '@/lib/firebase';
 import type { Order as OrderType, OrderItem as OrderItemType } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
@@ -11,6 +11,7 @@ import { Loader2, AlertTriangle, Edit } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useToast } from "@/hooks/use-toast";
 
 export default function OrderDetailsPage() {
     const params = useParams();
@@ -22,6 +23,8 @@ export default function OrderDetailsPage() {
     const [error, setError] = useState<string | null>(null);
     const [firebaseInitialized, setFirebaseInitialized] = useState(false);
     const [branchId, setBranchId] = useState<string | null>(null);
+    const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+    const { toast } = useToast();
 
     useEffect(() => {
         try {
@@ -63,7 +66,6 @@ export default function OrderDetailsPage() {
                   updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate() : new Date(),
                 } as OrderType);
 
-                // Now fetch items from the subcollection
                 const itemsRef = collection(db, 'branches', branchId!, 'orders', orderId, 'items');
                 const unsubscribeItems = onSnapshot(itemsRef, (itemsSnapshot) => {
                     const fetchedItems = itemsSnapshot.docs.map(itemDoc => ({
@@ -78,7 +80,6 @@ export default function OrderDetailsPage() {
                     setLoading(false);
                 });
 
-                // This return is crucial for cleaning up the items listener
                 return () => unsubscribeItems();
 
             } else {
@@ -91,7 +92,7 @@ export default function OrderDetailsPage() {
             setLoading(false);
         });
 
-        return () => unsubscribeOrder(); // Cleanup order listener
+        return () => unsubscribeOrder();
 
     }, [firebaseInitialized, orderId, branchId]);
 
@@ -99,6 +100,58 @@ export default function OrderDetailsPage() {
         if (!order || !order.table) return;
         router.push(`/dashboard/menu?orderId=${orderId}&tableId=${order.table.id}&tableNumber=${order.table.tableNumber}`);
     };
+
+    const handleProceedToPayment = async () => {
+        if (!order || !branchId) {
+            toast({ title: "Error", description: "Order or branch context is missing.", variant: "destructive" });
+            return;
+        }
+
+        setIsProcessingPayment(true);
+        const db = getDbInstance();
+        if (!db) {
+            toast({ title: "Database Error", description: "Could not connect to the database.", variant: "destructive" });
+            setIsProcessingPayment(false);
+            return;
+        }
+
+        const batch = writeBatch(db);
+
+        const orderRef = doc(db, 'branches', branchId, 'orders', orderId);
+        batch.update(orderRef, {
+            status: 'paid',
+            paidAt: Timestamp.now(),
+            updatedAt: Timestamp.now()
+        });
+
+        if (order.table?.id) {
+            const tableRef = doc(db, 'branches', branchId, 'tables', order.table.id);
+            batch.update(tableRef, {
+                status: 'cleaning',
+                currentOrder: null,
+                updatedAt: Timestamp.now()
+            });
+        }
+        
+        try {
+            await batch.commit();
+            toast({
+                title: "Payment Successful!",
+                description: `Order #${order.orderNumber} has been paid. Table ${order.table?.tableNumber || ''} is now being cleaned.`,
+            });
+            router.push('/dashboard/tables');
+        } catch (error) {
+            console.error("Error processing payment:", error);
+            toast({
+                title: "Payment Failed",
+                description: "An error occurred while finalizing the payment.",
+                variant: "destructive"
+            });
+        } finally {
+            setIsProcessingPayment(false);
+        }
+    };
+
 
     if (loading) {
         return <div className="flex justify-center items-center h-full"><Loader2 className="h-8 w-8 animate-spin" /></div>;
@@ -181,12 +234,20 @@ export default function OrderDetailsPage() {
                 </CardContent>
                 <CardFooter className="justify-end gap-2">
                     {order.status === 'open' && (
-                        <Button variant="outline" onClick={handleEditOrder}>
-                            <Edit className="mr-2 h-4 w-4" />
-                            Edit Order
-                        </Button>
+                        <>
+                            <Button variant="outline" onClick={handleEditOrder}>
+                                <Edit className="mr-2 h-4 w-4" />
+                                Edit Order
+                            </Button>
+                            <Button onClick={handleProceedToPayment} disabled={isProcessingPayment}>
+                                {isProcessingPayment && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                {isProcessingPayment ? 'Processing...' : 'Proceed to Payment'}
+                            </Button>
+                        </>
                     )}
-                    <Button>Proceed to Payment</Button>
+                    {order.status !== 'open' && (
+                        <p className="text-sm text-muted-foreground">This order is {order.status} and cannot be modified.</p>
+                    )}
                 </CardFooter>
             </Card>
         </div>

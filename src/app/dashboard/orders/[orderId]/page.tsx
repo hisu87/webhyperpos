@@ -6,12 +6,13 @@ import { useEffect, useState } from 'react';
 import { doc, onSnapshot, DocumentData, collection, writeBatch, Timestamp } from 'firebase/firestore';
 import { initializeFirebaseClient, db as getDbInstance } from '@/lib/firebase';
 import type { Order as OrderType, OrderItem as OrderItemType } from '@/lib/types';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Loader2, AlertTriangle, Edit } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
+import { PaymentProcessingCard } from '@/components/orders/PaymentProcessingCard';
 
 export default function OrderDetailsPage() {
     const params = useParams();
@@ -59,12 +60,13 @@ export default function OrderDetailsPage() {
         const unsubscribeOrder = onSnapshot(orderRef, (docSnap) => {
             if (docSnap.exists()) {
                 const data = docSnap.data() as DocumentData;
-                setOrder({
+                const newOrderData = {
                   id: docSnap.id,
                   ...data,
                   createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
                   updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate() : new Date(),
-                } as OrderType);
+                } as OrderType;
+                setOrder(newOrderData);
 
                 const itemsRef = collection(db, 'branches', branchId!, 'orders', orderId, 'items');
                 const unsubscribeItems = onSnapshot(itemsRef, (itemsSnapshot) => {
@@ -101,9 +103,14 @@ export default function OrderDetailsPage() {
         router.push(`/dashboard/menu?orderId=${orderId}&tableId=${order.table.id}&tableNumber=${order.table.tableNumber}`);
     };
 
-    const handleProceedToPayment = async () => {
+    const handleCompletePayment = async (paymentMethod: string) => {
         if (!order || !branchId) {
             toast({ title: "Error", description: "Order or branch context is missing.", variant: "destructive" });
+            return;
+        }
+        
+        if (!paymentMethod) {
+             toast({ title: "Payment Method Required", description: "Please select a payment method.", variant: "destructive" });
             return;
         }
 
@@ -121,7 +128,9 @@ export default function OrderDetailsPage() {
         batch.update(orderRef, {
             status: 'paid',
             paidAt: Timestamp.now(),
-            updatedAt: Timestamp.now()
+            updatedAt: Timestamp.now(),
+            // In a real app, you'd save the payment method too
+            // paymentMethod: paymentMethod,
         });
 
         if (order.table?.id) {
@@ -137,7 +146,7 @@ export default function OrderDetailsPage() {
             await batch.commit();
             toast({
                 title: "Payment Successful!",
-                description: `Order #${order.orderNumber} has been paid. Table ${order.table?.tableNumber || ''} is now being cleaned.`,
+                description: `Order #${order.orderNumber} has been paid with ${paymentMethod}. Table ${order.table?.tableNumber || ''} is now being cleaned.`,
             });
             router.push('/dashboard/tables');
         } catch (error) {
@@ -173,21 +182,29 @@ export default function OrderDetailsPage() {
          return <div className="text-center">Order details could not be loaded.</div>
     }
 
-    const subtotal = items.reduce((sum, item) => sum + (item.menuItem?.price || 0) * item.quantity, 0);
-
     return (
-        <div>
-            <Card>
-                <CardHeader>
-                    <CardTitle>Order #{order.orderNumber}</CardTitle>
-                    <CardDescription>
-                        Status: <span className="font-bold capitalize">{order.status}</span> | 
-                        Table: {order.table?.tableNumber || 'N/A'} | 
-                        Cashier: {order.user.username}
-                    </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                    <div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2">
+                <Card>
+                    <CardHeader>
+                        <div className="flex justify-between items-start">
+                            <div>
+                                <CardTitle>Order #{order.orderNumber}</CardTitle>
+                                <CardDescription>
+                                    Status: <span className="font-bold capitalize">{order.status}</span> | 
+                                    Table: {order.table?.tableNumber || 'N/A'} | 
+                                    Cashier: {order.user.username}
+                                </CardDescription>
+                            </div>
+                            {order.status === 'open' && (
+                                <Button variant="outline" onClick={handleEditOrder}>
+                                    <Edit className="mr-2 h-4 w-4" />
+                                    Edit Order
+                                </Button>
+                            )}
+                        </div>
+                    </CardHeader>
+                    <CardContent>
                         <h3 className="font-bold mb-2">Items</h3>
                         <Table>
                             <TableHeader>
@@ -212,44 +229,24 @@ export default function OrderDetailsPage() {
                                 ))}
                             </TableBody>
                         </Table>
-                    </div>
-
-                    <div className="flex justify-end">
-                        <div className="w-full max-w-xs space-y-2">
-                            <div className="flex justify-between">
-                                <span>Subtotal:</span>
-                                <span>${subtotal.toFixed(2)}</span>
+                         {order.status !== 'open' && (
+                            <div className="mt-6 text-center text-muted-foreground p-4 bg-muted rounded-md">
+                                This order is {order.status} and cannot be modified or paid again.
                             </div>
-                            <div className="flex justify-between">
-                                <span>Tax (est.):</span>
-                                <span>${(subtotal * 0.08).toFixed(2)}</span>
-                            </div>
-                            <div className="flex justify-between font-bold text-lg">
-                                <span>Total:</span>
-                                <span>${(subtotal * 1.08).toFixed(2)}</span>
-                            </div>
-                        </div>
-                    </div>
-                    
-                </CardContent>
-                <CardFooter className="justify-end gap-2">
-                    {order.status === 'open' && (
-                        <>
-                            <Button variant="outline" onClick={handleEditOrder}>
-                                <Edit className="mr-2 h-4 w-4" />
-                                Edit Order
-                            </Button>
-                            <Button onClick={handleProceedToPayment} disabled={isProcessingPayment}>
-                                {isProcessingPayment && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                {isProcessingPayment ? 'Processing...' : 'Proceed to Payment'}
-                            </Button>
-                        </>
-                    )}
-                    {order.status !== 'open' && (
-                        <p className="text-sm text-muted-foreground">This order is {order.status} and cannot be modified.</p>
-                    )}
-                </CardFooter>
-            </Card>
+                        )}
+                    </CardContent>
+                </Card>
+            </div>
+            <div className="lg:col-span-1">
+                 {order.status === 'open' && (
+                     <PaymentProcessingCard 
+                        order={order} 
+                        items={items}
+                        onCompletePayment={handleCompletePayment}
+                        isProcessing={isProcessingPayment}
+                    />
+                )}
+            </div>
         </div>
     );
 }

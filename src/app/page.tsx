@@ -4,6 +4,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -55,6 +56,7 @@ interface UserProfileAccessData {
 }
 
 export default function TenantBranchSelectionPage() {
+  const router = useRouter();
   const [firebaseInitialized, setFirebaseInitialized] = useState(false);
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
@@ -172,8 +174,20 @@ export default function TenantBranchSelectionPage() {
             setFetchError("Your user profile does not have an assigned tenant. Please contact support.");
         }
       } else {
-        console.warn("Tenant/Branch Page: No user profile found in 'users' collection with firebaseUid:", currentUser.uid);
+        console.warn("Tenant/Branch Page: No user profile found in 'users' collection with firebaseUid:", currentUser.uid, "Signing out and redirecting.");
+        setFetchError("User profile not found in database. Redirecting to login...");
         setUserProfileAccess(null);
+        
+        const auth = getAuthInstance();
+        if (auth) {
+            auth.signOut().then(() => {
+                console.log("User signed out due to missing profile. Redirecting to login.");
+                router.push('/login');
+            });
+        } else {
+            console.error("Auth instance not found, redirecting without signout.");
+            router.push('/login');
+        }
       }
       setIsLoadingUserProfile(false);
     }, (error) => {
@@ -183,6 +197,7 @@ export default function TenantBranchSelectionPage() {
       setIsLoadingUserProfile(false);
     });
     return () => unsubscribeUser();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser, isAuthLoading, firebaseInitialized]);
 
 
